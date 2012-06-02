@@ -22,23 +22,24 @@
 #include "util/base_classes/routing_base.h"
 #include "config.h"
 #include <string.h>
-#include "ctp_routing_engine_msg.h"
-#include "ctp_types.h"
+#include "algorithms/routing/ctp/ctp_routing_engine_msg.h"
+#include "algorithms/routing/ctp/ctp_link_estimator.h"
+#include "algorithms/routing/ctp/ctp_types.h"
 
-namespace wiselib
-{
+namespace wiselib {
 
 template<typename OsModel_P, typename RoutingTable_P,
 		typename Radio_P = typename OsModel_P::Radio,
 		typename Timer_P = typename OsModel_P::Timer,
 		typename Debug_P = typename OsModel_P::Debug>
-class CtpRoutingEngine: public RoutingBase<OsModel_P, Radio_P>
-{
+class CtpRoutingEngine: public RoutingBase<OsModel_P, Radio_P> {
 public:
 	typedef OsModel_P OsModel;
 	typedef Radio_P Radio;
 	typedef typename OsModel::Timer Timer;
 	typedef typename OsModel::Debug Debug;
+	typedef typename OsModel::Clock Clock;
+	typedef typename OsModel::RandomNumber RandomNumber;
 
 	typedef RoutingTable_P RoutingTable;
 	typedef typename RoutingTable::iterator RoutingTableIterator;
@@ -57,40 +58,38 @@ public:
 	typedef typename Radio::message_id_t message_id_t;
 
 	typedef typename Timer::millis_t millis_t;
+	typedef typename Clock::time_t time_t;
+	typedef typename RandomNumber::value_t value_t;
 
 	typedef CtpRoutingEngineMsg<OsModel, Radio> RoutingMessage;
+	typedef CtpLinkEstimator<OsModel, RoutingTable, Radio, Timer, Debug> LinkEstimator;
+
 	// --------------------------------------------------------------------
-	enum ErrorCodes
-	{
+	enum ErrorCodes {
 		SUCCESS = OsModel::SUCCESS,
 		ERR_UNSPEC = OsModel::ERR_UNSPEC,
 		ERR_NOTIMPL = OsModel::ERR_NOTIMPL,
 		ERR_BUSY = OsModel::ERR_BUSY
 	};
 	// --------------------------------------------------------------------
-	enum SpecialNodeIds
-	{
+	enum SpecialNodeIds {
 		BROADCAST_ADDRESS = Radio_P::BROADCAST_ADDRESS, ///< All nodes in communication range
-		NULL_NODE_ID = Radio_P::NULL_NODE_ID
-	///< Unknown/No node id
+		NULL_NODE_ID = Radio_P::NULL_NODE_ID ///< Unknown/No node id
 	};
 	// --------------------------------------------------------------------
-	enum Restrictions
-	{
-		MAX_MESSAGE_LENGTH = Radio_P::MAX_MESSAGE_LENGTH
-	///< Maximal number of bytes in payload
+	enum Restrictions {
+		MAX_MESSAGE_LENGTH = Radio_P::MAX_MESSAGE_LENGTH, ///< Maximal number of bytes in payload
+		RANDOM_MAX = RandomNumber::RANDOM_MAX ///< Maximum random number that can be generated
 	};
 	// --------------------------------------------------------------------
-	enum TimeoutPeriods
-	{
+	enum TimeoutPeriods {
 		BEACON_TIMER = 1,
 		ROUTE_TIMER = 2,
 		POST_UPDATEROUTETASK = 3,
 		POST_SENDBEACONTASK = 4,
 	};
 
-	enum TreeRouting
-	{
+	enum TreeRouting {
 		AM_TREE_ROUTING_CONTROL = 0xCE,
 		BEACON_INTERVAL = 8192,
 		INVALID_ADDR = NULL_NODE_ID,
@@ -108,14 +107,14 @@ public:
 		bool congested;
 	} route_info_t;
 
-	typedef struct
-	{
+	typedef struct {
 		node_id_t neighbor;
 		route_info_t info;
 	} routing_table_entry;
 
+	LinkEstimator le;
+
 	/////////////////////// CtpRoutingEngineP.nc //////////////////////////
-	///////////////////////////////////////////////////////////////////////
 
 	bool ECNOff;
 	bool radioOn;
@@ -145,11 +144,7 @@ public:
 	uint32_t t;
 	bool tHasPassed;
 
-	///////////////////////////////////////////////////////////////////////
-	///////////////////////////////////////////////////////////////////////
-
 	/////////////////////// Custom Variables //////////////////////////////
-	///////////////////////////////////////////////////////////////////////
 
 	// Pointers to other modules.
 	//	CtpForwardingEngine *cfe;
@@ -177,11 +172,15 @@ public:
 	~CtpRoutingEngine();
 	///@}
 
-	int init( Radio& radio, Timer& timer, Debug& debug )
-	{
+	int init(Radio& radio, Timer& timer, Debug& debug, Clock& clock,
+			RandomNumber& random_number) {
 		radio_ = &radio;
 		timer_ = &timer;
 		debug_ = &debug;
+		clock_ = &clock;
+		random_number_ = &random_number;
+
+		le = CtpRoutingEngine();
 
 		//initialize RE parameters with default values
 		maxInterval = 512000;
@@ -194,7 +193,7 @@ public:
 		/////////////////////////////////////////////////////////////////////
 
 		ECNOff = true;
-					radioOn = true ; // TO IMPLEMENT ------ radioOn in stdcontrol
+		radioOn = true; // TO IMPLEMENT ------ radioOn in stdcontrol
 		running = false;
 		sending = false;
 		justEvicted = false;
@@ -202,18 +201,14 @@ public:
 		//			routingTable = new routing_table_entry[routingTableSize] ;
 
 		currentInterval = minInterval;
-		BEACON_TIMER;
-		/////////////////////////////////////////////////////////////////////
-		/////////////////////////////////////////////////////////////////////
 
 		/////////////////////////// Init.init() /////////////////////////////
-		/////////////////////////////////////////////////////////////////////
 
 		routeUpdateTimerCount = 0;
 		parentChanges = 0;
 		state_is_root = 0;
 
-		routeInfoInit( &routeInfo );
+		routeInfoInit(&routeInfo);
 		routingTableInit();
 		my_ll_addr = radio().id();
 		self = radio().id();
@@ -222,11 +217,10 @@ public:
 		//			beaconMsg->setByteLength(ctpReHeaderSize) ;
 
 		// Call the corresponding rootcontrol command
-		isRoot ? command_RootControl_setRoot()
-				: command_RootControl_unsetRoot();
+		isRoot ?
+				command_RootControl_setRoot() : command_RootControl_unsetRoot();
 
-		/////////////////////////////////////////////////////////////////////
-		/////////////////////////////////////////////////////////////////////
+		random_number().srand(clock().time(NULL) * (3 * radio().id() + 2));
 
 		return SUCCESS;
 	}
@@ -236,58 +230,62 @@ public:
 
 	///@name Routing Control
 	///@{
-	int enable_radio( void );
-	int disable_radio( void );
+	int enable_radio(void);
+	int disable_radio(void);
 	///@}
 
 	///@name Methods called by Timer
 	///@{
-	void timer_elapsed( void *userdata );
+	void timer_elapsed(void *userdata);
 	///@}
 
 	///@name Radio Concept
 	///@{
 	/**
 	 */
-	int send( node_id_t receiver, size_t len, block_data_t *data );
+	int send(node_id_t receiver, size_t len, block_data_t *data);
 	/**
 	 */
-	void receive( node_id_t from, size_t len, block_data_t *data );
+	void receive(node_id_t from, size_t len, block_data_t *data);
 	/**
 	 */
-	typename Radio::node_id_t id()
-	{
+	typename Radio::node_id_t id() {
 		return radio_->id();
 	}
 	///@}
 
-
 private:
 
-	Radio& radio()
-	{
+	Radio& radio() {
 		return *radio_;
 	}
 
-	Timer& timer()
-	{
+	Timer& timer() {
 		return *timer_;
 	}
 
-	Debug& debug()
-	{
+	Debug& debug() {
 		return *debug_;
+	}
+
+	Clock& clock() {
+		return *clock_;
+	}
+
+	RandomNumber& random_number() {
+		return *random_number_;
 	}
 
 	typename Radio::self_pointer_t radio_;
 	typename Timer::self_pointer_t timer_;
 	typename Debug::self_pointer_t debug_;
+	typename Debug::self_pointer_t clock_;
+	typename RandomNumber::self_pointer_t random_number_;
 
 	RoutingTable routing_table_;
 	RoutingMessage routing_message_;
 
-	inline void routeInfoInit( route_info_t *ri )
-	{
+	inline void routeInfoInit(route_info_t *ri) {
 		ri->parent = INVALID_ADDR;
 		ri->etx = 0;
 		ri->haveHeard = 0;
@@ -300,39 +298,51 @@ private:
 	 */
 
 	// -----------------------------------------------------------------------
-	int setTimer( void *userdata, millis_t millis )
-	{
-		return timer().template set_timer<self_type, &self_type::timer_elapsed> (
-				millis, this, userdata );
+	int setTimer(void *userdata, millis_t millis) {
+		return timer().template set_timer<self_type, &self_type::timer_elapsed>(
+				millis, this, userdata);
 	}
 
-	void chooseAdvertiseTime()
-	{
+	/* Methods for adjusting the Tricckle timeout interval */
+
+	void chooseAdvertiseTime() {
 		t = currentInterval;
 		t /= 2;
 
 		/* TODO: Need to clarify the use of the Random Wiselib concept */
 
 		//	t += command_Random_rand32( 1 ) % t;
-		t += rand() % t;
+		t += random_number().rand(RANDOM_MAX) % t;
 		tHasPassed = false;
-		setTimer( BEACON_TIMER, t );
+		setTimer(&BEACON_TIMER, t);
 	}
 
-	void resetInterval()
-	{
+	void resetInterval() {
 		currentInterval = minInterval;
 		chooseAdvertiseTime();
 	}
 
-	error_t command_StdControl_start()
-	{
+	void decayInterval() {
+		currentInterval *= 2;
+		if (currentInterval > maxInterval) {
+			currentInterval = maxInterval;
+		}
+		chooseAdvertiseTime();
+	}
+
+	void remainingInterval() {
+		uint32_t remaining = currentInterval;
+		remaining -= t;
+		tHasPassed = true;
+		setTimer(&BEACON_TIMER, remaining);
+	}
+
+	error_t command_StdControl_start() {
 		//start will (re)start the sending of messages
-		if (!running)
-		{
+		if (!running) {
 			running = true;
 			resetInterval();
-			setTimer( ROUTE_TIMER, tosMillisToSeconds( BEACON_INTERVAL ) );
+			setTimer(ROUTE_TIMER, tosMillisToSeconds(BEACON_INTERVAL));
 #ifdef ROUTING_ENGINE_DEBUG
 			debug().debug( "RE: stdControl.start - running %b\n", running );
 #endif
@@ -340,13 +350,152 @@ private:
 		return SUCCESS;
 	}
 
-	error_t command_StdControl_stop()
-	{
+	error_t command_StdControl_stop() {
 		running = false;
 #ifdef ROUTING_ENGINE_DEBUG
 		debug().debug( "RE: stdControl.stop - running %b\n", running );
 #endif
 		return SUCCESS;
+	}
+
+	/* Is this quality measure better than the minimum threshold? */
+	// Implemented assuming quality is EETX
+	bool passLinkEtxThreshold(uint16_t etx) {
+		return true;
+		//    	return (etx < ETX_THRESHOLD);
+	}
+
+	/* Converts the output of the link estimator to path metric
+	 * units, that can be *added* to form path metric measures */
+	uint16_t evaluateEtx(uint16_t quality) {
+#ifdef ROUTING_ENGINE_DEBUG
+		debug().debug( "evaluateEtx - %d -> %d\n", (int) quality, (int)(quality+10));
+#endif
+		return (quality + 10);
+	}
+
+	/* updates the routing information, using the info that has been received
+	 * from neighbor beacons. Two things can cause this info to change:
+	 * neighbor beacons, changes in link estimates, including neighbor eviction */
+	void updateRouteTask() {
+		uint8_t i;
+		routing_table_entry * entry;
+		routing_table_entry * best;
+		uint16_t minEtx;
+		uint16_t currentEtx;
+		uint16_t linkEtx, pathEtx;
+
+		if (state_is_root)
+			return;
+
+		best = NULL;
+		/* Minimum etx found among neighbors, initially infinity */
+		minEtx = MAX_METRIC;
+		/* Metric through current parent, initially infinity */
+		currentEtx = MAX_METRIC;
+
+#ifdef ROUTING_ENGINE_DEBUG
+		debug().debug( "updateRouteTask");
+#endif
+
+		/* Find best path in table, other than our current */
+		for (i = 0; i < routingTableActive; i++) {
+			entry = &routingTable[i];
+
+			// Avoid bad entries and 1-hop loops
+			if (entry->info.parent == INVALID_ADDR
+					|| entry->info.parent == my_ll_addr) {
+#ifdef ROUTING_ENGINE_DEBUG
+				debug().debug( "routingTable[%d]: neighbour: [id: %d, neighbour: %d, etx: NO ROUTE]\n", (int) i, (int) entry->neighbor , entry->info.parent);
+#endif
+
+				continue;
+			}
+			/* Compute this neighbor's path metric */
+			linkEtx = evaluateEtx(le.command_LinkEstimator_getLinkQuality(entry->neighbor));
+
+#ifdef ROUTING_ENGINE_DEBUG
+			debug().debug( "routingTable[%d]: neighbour: [id: %d, neighbour: %d, etx: %d]\n", (int) i, (int) entry->neighbor , entry->info.parent,(int) linkEtx);
+#endif
+			pathEtx = linkEtx + entry->info.etx;
+			/* Operations specific to the current parent */
+			if (entry->neighbor == routeInfo.parent) {
+#ifdef ROUTING_ENGINE_DEBUG
+				debug().debug( "already parent");
+#endif
+				currentEtx = pathEtx;
+				/* update routeInfo with parent's current info */
+				routeInfo.etx = entry->info.etx;
+				routeInfo.congested = entry->info.congested;
+				continue;
+			}
+			/* Ignore links that are congested */
+			if (entry->info.congested)
+				continue;
+			/* Ignore links that are bad */
+			if (!passLinkEtxThreshold(linkEtx)) {
+#ifdef ROUTING_ENGINE_DEBUG
+				debug().debug( "did not pass threshold.");
+#endif
+				continue;
+			}
+
+			if (pathEtx < minEtx) {
+				minEtx = pathEtx;
+				best = entry;
+			}
+		}
+
+		/* Now choose between the current parent and the best neighbor */
+		/* Requires that:
+		 1. at least another neighbor was found with ok quality and not congested
+		 2. the current parent is congested and the other best route is at least as good
+		 3. or the current parent is not congested and the neighbor quality is better by
+		 the PARENT_SWITCH_THRESHOLD.
+		 Note: if our parent is congested, in order to avoid forming loops, we try to select
+		 a node which is not a descendent of our parent. routeInfo.ext is our parent's
+		 etx. Any descendent will be at least that + 10 (1 hop), so we restrict the
+		 selection to be less than that.
+		 */
+		if (minEtx != MAX_METRIC) {
+			if (currentEtx == MAX_METRIC
+					|| (routeInfo.congested && (minEtx < (routeInfo.etx + 10)))
+					|| minEtx + PARENT_SWITCH_THRESHOLD < currentEtx) {
+				// routeInfo.metric will not store the composed metric.
+				// since the linkMetric may change, we will compose whenever
+				// we need it: i. when choosing a parent (here);
+				//            ii. when choosing a next hop
+				parentChanges++;
+#ifdef ROUTING_ENGINE_DEBUG
+				debug().debug( "Changed parent from %d to %d",(int) routeInfo.parent, (int) best);
+#endif
+				le->command_LinkEstimator_unpinNeighbor(routeInfo.parent);
+				le->command_LinkEstimator_pinNeighbor(best->neighbor);
+				le->command_LinkEstimator_clearDLQ(best->neighbor);
+
+				routeInfo.parent = best->neighbor;
+				routeInfo.etx = best->info.etx;
+				routeInfo.congested = best->info.congested;
+			}
+		}
+
+		/* Finally, tell people what happened:  */
+		/* We can only loose a route to a parent if it has been evicted. If it hasn't
+		 * been just evicted then we already did not have a route */
+		if (justEvicted && routeInfo.parent == INVALID_ADDR) {
+			//TODO Callback to FE to signal no route found
+//			signal_Routing_noRoute();
+		}
+		/* On the other hand, if we didn't have a parent (no currentEtx) and now we
+		 * do, then we signal route found. The exception is if we just evicted the
+		 * parent and immediately found a replacement route: we don't signal in this
+		 * case */
+		else if (!justEvicted && currentEtx == MAX_METRIC
+				&& minEtx != MAX_METRIC) {
+			//TODO Callback to FE to signal route found
+//			signal_Routing_routeFound();
+		}
+		justEvicted = false;
 	}
 
 	/************************************************************/
@@ -360,9 +509,96 @@ private:
 	 *   - no replacement: eviction follows the LinkEstimator table
 	 */
 
-	void routingTableInit()
-	{
-		routingTableActive = 0;
+	// these functions simulate the post command of TinyOs
+	void post_updateRouteTask() {
+		setTimer(&POST_UPDATEROUTETASK, 0); // cannot call the updateRouteTask directly. By this way it is more similar to the post command in TinyOs.
+	}
+
+	void post_sendBeaconTask() {
+		setTimer(&POST_SENDBEACONTASK, 0);
+	}
+
+	/* send a beacon advertising this node's routeInfo */
+	// only posted if running and radioOn
+	void sendBeaconTask() {
+		error_t eval;
+		if (sending) {
+			return;
+		}
+
+		beaconMsg.set_options(0);
+
+		/* Congestion notification: am I congested? */
+		//TODO Callback to FE
+//		if (cfe->command_CtpCongestion_isCongested()) {
+//			beaconMsg.set_congestion();
+//		}
+		beaconMsg->set_parent(routeInfo.parent);
+		if (state_is_root) {
+			beaconMsg->set_etx(routeInfo.etx);
+		} else if (routeInfo.parent == INVALID_ADDR) {
+			beaconMsg.set_etx(routeInfo.etx);
+			beaconMsg.set_pull();
+		} else {
+			//TODO Call get link quality from LE
+//			beaconMsg.set_etx(
+//					routeInfo.etx
+//							+ evaluateEtx(
+//									le->command_LinkEstimator_getLinkQuality(
+//											routeInfo.parent)));
+		}
+
+#ifdef ROUTING_ENGINE_DEBUG
+		debug().debug( "sendBeaconTask - parent: %d etx: \n", (int) beaconMsg.parent(), (int) beaconMsg.etx());
+#endif
+
+		//TODO: Solve the lastHope issue
+//		beaconMsg->getNetMacInfoExchange().lastHop = self; // ok
+
+		//TODO: Call LE send command
+//		eval = le->command_Send_send(BROADCAST_ADDRESS, beaconMsg); // the duplicate will be deleted in the LE module, we keep a copy here that is reused each time.
+
+		if (eval == SUCCESS) {
+			sending = true;
+		} else {
+			radioOn = false;
+#ifdef ROUTING_ENGINE_DEBUG
+			debug().debug( "sendBeaconTask - running: %b, radioOn: %b \n",running, radioOn);
+#endif
+		}
+	}
+
+	//TODO: This method should be invoked through callback from the LE
+	void event_BeaconSend_sendDone(block_data_t* msg, error_t error) {
+		if (!sending) {
+			//something smells bad around here
+#ifdef ROUTING_ENGINE_DEBUG
+			debug().debug( "event_BeaconSend_sendDone: something smells bad around here\n");
+#endif
+			return;
+		}
+		sending = false;
+	}
+
+	void event_RouteTimer_fired() {
+		if (radioOn && running) {
+			post_updateRouteTask();
+		}
+	}
+
+	void event_BeaconTimer_fired() {
+		if (radioOn && running) {
+			if (!tHasPassed) {
+				post_updateRouteTask(); // always the most up to date info
+				post_sendBeaconTask();
+#ifdef ROUTING_ENGINE_DEBUG
+				debug().debug( "Beacon timer fired.\n" );
+#endif
+				remainingInterval();
+			} else {
+				decayInterval();
+			}
+		}
 	}
 
 	/*
@@ -370,18 +606,16 @@ private:
 	 */
 	/** sets the current node as a root, if not already a root */
 	/*  returns FAIL if it's not possible for some reason      */
-	error_t command_RootControl_setRoot()
-	{
+	error_t command_RootControl_setRoot() {
 		bool route_found = false;
 		route_found = (routeInfo.parent == INVALID_ADDR);
 		state_is_root = 1;
 		routeInfo.parent = my_ll_addr; //myself
 		routeInfo.etx = 0;
-		if (route_found)
-		{
+		if (route_found) {
 
 			//TODO: Implement callback to Forward Engine
-			signal_Routing_routeFound();
+			//			signal_Routing_routeFound();
 		}
 #ifdef ROUTING_ENGINE_DEBUG
 		debug().debug( "RootControl.setRoot - I'm a root now! %d\n", (int) routeInfo.parent );
@@ -389,10 +623,9 @@ private:
 		return SUCCESS;
 	}
 
-	error_t command_RootControl_unsetRoot()
-	{
+	error_t command_RootControl_unsetRoot() {
 		state_is_root = 0;
-		routeInfoInit( &routeInfo );
+		routeInfoInit(&routeInfo);
 #ifdef ROUTING_ENGINE_DEBUG
 		debug().debug( "RootControl.unsetRoot - I'm not a root now!\n" );
 #endif
@@ -401,20 +634,12 @@ private:
 		return SUCCESS;
 	}
 
-	bool command_RootControl_isRoot()
-	{
+	bool command_RootControl_isRoot() {
 		return state_is_root;
 	}
 
-	// these functions simulate the post command of TinyOs
-	void post_updateRouteTask()
-	{
-		setTimer( POST_UPDATEROUTETASK, 0 ); // cannot call the updateRouteTask directly. By this way it is more similar to the post command in TinyOs.
-	}
-
-	void post_sendBeaconTask()
-	{
-		setTimer( POST_SENDBEACONTASK, 0 );
+	void routingTableInit() {
+		routingTableActive = 0;
 	}
 
 };
@@ -424,14 +649,12 @@ private:
 // -----------------------------------------------------------------------
 template<typename OsModel_P, typename RoutingTable_P, typename Radio_P,
 		typename Timer_P, typename Debug_P>
-CtpRoutingEngine<OsModel_P, RoutingTable_P, Radio_P, Timer_P, Debug_P>::CtpRoutingEngine()
-{
+CtpRoutingEngine<OsModel_P, RoutingTable_P, Radio_P, Timer_P, Debug_P>::CtpRoutingEngine() {
 }
 // -----------------------------------------------------------------------
 template<typename OsModel_P, typename RoutingTable_P, typename Radio_P,
 		typename Timer_P, typename Debug_P>
-CtpRoutingEngine<OsModel_P, RoutingTable_P, Radio_P, Timer_P, Debug_P>::~CtpRoutingEngine()
-{
+CtpRoutingEngine<OsModel_P, RoutingTable_P, Radio_P, Timer_P, Debug_P>::~CtpRoutingEngine() {
 #ifdef ROUTING_ENGINE_DEBUG
 	debug().debug( "Re: Destroyed\n" );
 #endif
@@ -440,8 +663,7 @@ CtpRoutingEngine<OsModel_P, RoutingTable_P, Radio_P, Timer_P, Debug_P>::~CtpRout
 template<typename OsModel_P, typename RoutingTable_P, typename Radio_P,
 		typename Timer_P, typename Debug_P>
 int CtpRoutingEngine<OsModel_P, RoutingTable_P, Radio_P, Timer_P, Debug_P>::init(
-		void )
-{
+		void) {
 	routing_table_.clear();
 	routing_message_ = RoutingMessage();
 
@@ -453,16 +675,14 @@ int CtpRoutingEngine<OsModel_P, RoutingTable_P, Radio_P, Timer_P, Debug_P>::init
 template<typename OsModel_P, typename RoutingTable_P, typename Radio_P,
 		typename Timer_P, typename Debug_P>
 int CtpRoutingEngine<OsModel_P, RoutingTable_P, Radio_P, Timer_P, Debug_P>::destruct(
-		void )
-{
+		void) {
 	return disable_radio();
 }
 // -----------------------------------------------------------------------
 template<typename OsModel_P, typename RoutingTable_P, typename Radio_P,
 		typename Timer_P, typename Debug_P>
 int CtpRoutingEngine<OsModel_P, RoutingTable_P, Radio_P, Timer_P, Debug_P>::enable_radio(
-		void )
-{
+		void) {
 #ifdef ROUTING_ENGINE_DEBUG
 	debug().debug( "Re: Boot for %d\n", radio().id() );
 #endif
@@ -471,10 +691,10 @@ int CtpRoutingEngine<OsModel_P, RoutingTable_P, Radio_P, Timer_P, Debug_P>::enab
 
 	command_StdControl_start();
 
-	radio().template reg_recv_callback<self_type, &self_type::receive> ( this );
+	radio().template reg_recv_callback<self_type, &self_type::receive>(this);
 
-	timer().template set_timer<self_type, &self_type::timer_elapsed> ( 15000,
-			this, 0 );
+	timer().template set_timer<self_type, &self_type::timer_elapsed>(15000,
+			this, 0);
 
 	return SUCCESS;
 }
@@ -482,8 +702,7 @@ int CtpRoutingEngine<OsModel_P, RoutingTable_P, Radio_P, Timer_P, Debug_P>::enab
 template<typename OsModel_P, typename RoutingTable_P, typename Radio_P,
 		typename Timer_P, typename Debug_P>
 int CtpRoutingEngine<OsModel_P, RoutingTable_P, Radio_P, Timer_P, Debug_P>::disable_radio(
-		void )
-{
+		void) {
 #ifdef ROUTING_ENGINE_DEBUG
 	debug().debug( "Re: Disable\n" );
 #endif
@@ -494,44 +713,38 @@ int CtpRoutingEngine<OsModel_P, RoutingTable_P, Radio_P, Timer_P, Debug_P>::disa
 template<typename OsModel_P, typename RoutingTable_P, typename Radio_P,
 		typename Timer_P, typename Debug_P>
 void CtpRoutingEngine<OsModel_P, RoutingTable_P, Radio_P, Timer_P, Debug_P>::timer_elapsed(
-		void *userdata )
-{
-	int timeout = *static_cast<int*> ( userdata );
+		void *userdata) {
+	int timeout = *static_cast<int*>(userdata);
 
 #ifdef ROUTING_ENGINE_DEBUG
 	debug().debug( "Re: TimerFiredCallback, timeout: %d.\n", timeout );
 #endif
-	switch (timeout)
-	{
+	switch (timeout) {
 
-	case ROUTE_TIMER:
-	{
-		setTimer( ROUTE_TIMER,  BEACON_INTERVAL ); // because it's a periodic timer.
+	case ROUTE_TIMER: {
+		setTimer(&ROUTE_TIMER, BEACON_INTERVAL); // because it's a periodic timer.
 		event_RouteTimer_fired();
 		break;
 	}
-	case BEACON_TIMER:
-	{
+	case BEACON_TIMER: {
 		event_BeaconTimer_fired();
 		break;
 	}
-	case POST_UPDATEROUTETASK:
-	{
+	case POST_UPDATEROUTETASK: {
 		updateRouteTask();
 		break;
 	}
 
-	case POST_SENDBEACONTASK:
-	{
+	case POST_SENDBEACONTASK: {
 		sendBeaconTask();
 		break;
 	}
 
-	default:
-	{
+	default: {
 #ifdef ROUTING_ENGINE_DEBUG
 		debug().debug( "Re: TimerFiredCallback unexpected timeout: %d\n", timeout );
 #endif
+		break;
 	}
 	}
 }
@@ -539,30 +752,26 @@ void CtpRoutingEngine<OsModel_P, RoutingTable_P, Radio_P, Timer_P, Debug_P>::tim
 template<typename OsModel_P, typename RoutingTable_P, typename Radio_P,
 		typename Timer_P, typename Debug_P>
 int CtpRoutingEngine<OsModel_P, RoutingTable_P, Radio_P, Timer_P, Debug_P>::send(
-		node_id_t destination, size_t len, block_data_t *data )
-{
+		node_id_t destination, size_t len, block_data_t *data) {
 
-	RoutingTableIterator it = routing_table_.find( destination );
-	if (it != routing_table_.end())
-	{
-		routing_message_.set_path( it->second.path );
-		radio().send( it->second.path[1], routing_message_.buffer_size(),
-				(uint8_t*) &routing_message_ );
-#ifdef ROUTING_ENGINE_DEBUG
-		debug().debug( "Re: Existing path in Cache with size %d hops %d idx %d\n",
-				it->second.path.size(), it->second.hops, routing_message_.path_idx() );
-		print_path( it->second.path );
-#endif
-	}
-	else
-	{
-
-		// radio().send( Radio::BROADCAST_ADDRESS, message.buffer_size(),
-		// (uint8_t*) &message );
-#ifdef ROUTING_ENGINE_DEBUG
-		debug().debug( "Re: Start Route Request from %d to %d.\n", message.source(), message.destination() );
-#endif
-	}
+//	RoutingTableIterator it = routing_table_.find(destination);
+//	if (it != routing_table_.end()) {
+//		routing_message_.set_path(it->second.path);
+//		radio().send(it->second.path[1], routing_message_.buffer_size(),
+//				(uint8_t*) &routing_message_);
+//#ifdef ROUTING_ENGINE_DEBUG
+//		debug().debug( "Re: Existing path in Cache with size %d hops %d idx %d\n",
+//				it->second.path.size(), it->second.hops, routing_message_.path_idx() );
+//		print_path( it->second.path );
+//#endif
+//	} else {
+//
+//		// radio().send( Radio::BROADCAST_ADDRESS, message.buffer_size(),
+//		// (uint8_t*) &message );
+//#ifdef ROUTING_ENGINE_DEBUG
+//		debug().debug( "Re: Start Route Request from %d to %d.\n", message.source(), message.destination() );
+//#endif
+//	}
 
 	return SUCCESS;
 }
@@ -570,11 +779,9 @@ int CtpRoutingEngine<OsModel_P, RoutingTable_P, Radio_P, Timer_P, Debug_P>::send
 template<typename OsModel_P, typename RoutingTable_P, typename Radio_P,
 		typename Timer_P, typename Debug_P>
 void CtpRoutingEngine<OsModel_P, RoutingTable_P, Radio_P, Timer_P, Debug_P>::receive(
-		node_id_t from, size_t len, block_data_t *data )
-{
-	message_id_t msg_id = read<OsModel, block_data_t, message_id_t> ( data );
-	if (msg_id)
-	{
+		node_id_t from, size_t len, block_data_t *data) {
+	message_id_t msg_id = read<OsModel, block_data_t, message_id_t>(data);
+	if (msg_id) {
 		// RouteDiscoveryMessage *message =
 		// reinterpret_cast<RouteDiscoveryMessage*> ( data );
 		// handle_route_request( from, *message );
@@ -587,8 +794,8 @@ void CtpRoutingEngine<OsModel_P, RoutingTable_P, Radio_P, Timer_P, Debug_P>::rec
 		// }
 		// else if (msg_id == ReMsgId)
 		// {
-		RoutingMessage *message = reinterpret_cast<RoutingMessage*> ( data );
-		handle_routing_message( from, len, *message );
+		RoutingMessage *message = reinterpret_cast<RoutingMessage*>(data);
+		handle_routing_message(from, len, *message);
 	}
 }
 

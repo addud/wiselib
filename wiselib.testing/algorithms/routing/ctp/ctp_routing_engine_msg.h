@@ -20,7 +20,7 @@
 #define __CTP_RE___CTP_ROUTING_ENGINE_MESSAGE_H__MESSAGE_H__
 
 //#include "util/serialization/simple_types.h"
-#include "ctp_types.h"
+#include "algorithms/routing/ctp/ctp_types.h"
 
 namespace wiselib
 {

@@ -20,6 +20,8 @@
 #ifndef CTP_TYPES_H_
 #define CTP_TYPES_H_
 
+#include "util/serialization/simple_types.h"
+
 namespace wiselib
 {
 
