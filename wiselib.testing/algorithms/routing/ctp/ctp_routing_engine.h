@@ -63,6 +63,11 @@ public:
 
 	typedef CtpRoutingEngineMsg<OsModel, Radio> RoutingMessage;
 	typedef CtpLinkEstimator<OsModel, RoutingTable, Radio, Timer, Debug> LinkEstimator;
+//	typedef CtpLinkEstimator<OsModel, RoutingTable> LinkEstimator;
+//	typedef wiselib::vector_static<Os, Os::Radio::node_id_t, 10> node_vector_t;
+//	typedef wiselib::StaticArrayRoutingTable<Os, Os::Radio, 54, wiselib::DsrRoutingTableValue<Os::Radio, node_vector_t> > routing_table_t;
+//	typedef wiselib::DsrRouting<Os, routing_table_t> routing_t;
+
 
 	// --------------------------------------------------------------------
 	enum ErrorCodes {
@@ -469,9 +474,9 @@ private:
 #ifdef ROUTING_ENGINE_DEBUG
 				debug().debug( "Changed parent from %d to %d",(int) routeInfo.parent, (int) best);
 #endif
-				le->command_LinkEstimator_unpinNeighbor(routeInfo.parent);
-				le->command_LinkEstimator_pinNeighbor(best->neighbor);
-				le->command_LinkEstimator_clearDLQ(best->neighbor);
+				le.command_LinkEstimator_unpinNeighbor(routeInfo.parent);
+				le.command_LinkEstimato_pinNeighbor(best->neighbor);
+				le.command_LinkEstimator_clearDLQ(best->neighbor);
 
 				routeInfo.parent = best->neighbor;
 				routeInfo.etx = best->info.etx;
@@ -566,6 +571,48 @@ private:
 			debug().debug( "sendBeaconTask - running: %b, radioOn: %b \n",running, radioOn);
 #endif
 		}
+	}
+
+	/* Handle the receiving of beacon messages from the neighbors. We update the
+	 * table, but wait for the next route update to choose a new parent */
+	void event_BeaconReceive_receive(node_id_t from, RoutingMessage* msg) {
+		bool congested;
+		RoutingMessage* rcvBeacon;
+
+		rcvBeacon = msg;
+		// we skip the check of beacon length.
+
+// 		CtpBeacon* rcvBeacon = check_and_cast<CtpBeacon*>(msg) ;
+
+		congested = rcvBeacon->congestion();
+
+#ifdef ROUTING_ENGINE_DEBUG
+			debug().debug( "BeaconReceive.receive - from %d [parent: %d etx: %d] \n", (int) from, (int) (rcvBeacon->parent()), (int) (rcvBeacon->etx()) );
+#endif
+
+		//update neighbor table
+		if (rcvBeacon->parent() != INVALID_ADDR) {
+
+			/* If this node is a root, request a forced insert in the link
+			 * estimator table and pin the node. */
+
+			if (rcvBeacon->getEtx() == 0) {
+#ifdef ROUTING_ENGINE_DEBUG
+			debug().debug( "from a root, inserting if not in table" );
+#endif
+				le.command_LinkEstimator_insertNeighbor(from) ;
+				le.command_LinkEstimator_pinNeighbor(from) ;
+			}
+			//TODO: also, if better than my current parent's path etx, insert
+
+			routingTableUpdateEntry(from, rcvBeacon->parent(), rcvBeacon->etx());
+			command_CtpInfo_setNeighborCongested(from,congested) ;
+		}
+
+		if (rcvBeacon->pull()) {
+			resetInterval();
+		}
+		// we do not return routing messages
 	}
 
 	//TODO: This method should be invoked through callback from the LE
@@ -795,7 +842,9 @@ void CtpRoutingEngine<OsModel_P, RoutingTable_P, Radio_P, Timer_P, Debug_P>::rec
 		// else if (msg_id == ReMsgId)
 		// {
 		RoutingMessage *message = reinterpret_cast<RoutingMessage*>(data);
-		handle_routing_message(from, len, *message);
+		event_BeaconReceive_receive(from, *message);
+
+		//TODO: implement logic for forwarding messages destinated to the FE
 	}
 }
 

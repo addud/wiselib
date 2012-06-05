@@ -16,11 +16,17 @@
  ** License along with the Wiselib.                                       **
  ** If not, see <http://www.gnu.org/licenses/>.                           **
  ***************************************************************************/
-#ifndef __CTP_ROUTING_ENGINE_MESSAGE_H__
-#define __CTP_RE___CTP_ROUTING_ENGINE_MESSAGE_H__MESSAGE_H__
+#ifndef __CTP_ROUTING_ENGINE_MSG_H__
+#define __CTP_ROUTING_ENGINE_MSG_H__
 
+//#define COMPILE_FOLDER
+//
+//#ifdef COMPILE_FOLDER
+//#include "ctp_types.h"
+//#else
 //#include "util/serialization/simple_types.h"
 #include "algorithms/routing/ctp/ctp_types.h"
+//#endif
 
 namespace wiselib
 {
@@ -148,4 +154,4 @@ CtpRoutingEngineMsg<OsModel_P, Radio_P>::CtpRoutingEngineMsg(
 }
 
 }
-#endif /* __CTP_ROUTING_ENGINE_MESSAGE_H__ */
+#endif /* __CTP_ROUTING_ENGINE_MSG_H__ */
