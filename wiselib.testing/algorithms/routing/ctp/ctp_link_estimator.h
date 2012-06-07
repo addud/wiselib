@@ -28,7 +28,8 @@ namespace wiselib {
 template<typename OsModel_P, typename RandomNumber_P,
 		typename Radio_P = typename OsModel_P::Radio,
 		typename Timer_P = typename OsModel_P::Timer,
-		typename Debug_P = typename OsModel_P::Debug>
+		typename Debug_P = typename OsModel_P::Debug,
+		typename Clock_P = typename OsModel_P::Clock>
 class CtpLinkEstimator: public RoutingBase<OsModel_P, Radio_P> {
 public:
 	typedef OsModel_P OsModel;
@@ -38,9 +39,7 @@ public:
 	typedef Debug_P Debug;
 	typedef typename OsModel::Clock Clock;
 
-
-
-	typedef CtpLinkEstimator<OsModel, Radio> self_type;
+	typedef CtpLinkEstimator<OsModel, RandomNumber, Radio, Timer, Debug, Clock> self_type;
 	typedef self_type* self_pointer_t;
 
 	typedef typename Radio::node_id_t node_id_t;
@@ -72,24 +71,6 @@ public:
 	};
 	// --------------------------------------------------------------------
 
-	int init(Radio& radio, Timer& timer, Debug& debug, Clock& clock,
-			RandomNumber& random_number) {
-		radio_ = &radio;
-		timer_ = &timer;
-		debug_ = &debug;
-		clock_ = &clock;
-		random_number_ = &random_number;
-
-		random_number().srand(clock().time(NULL) * (3 * radio().id() + 2));
-
-		return SUCCESS;
-	}
-
-	typename Radio::node_id_t id() {
-		return radio_->id();
-	}
-	///@}
-
 	CtpLinkEstimator() {
 	}
 
@@ -100,6 +81,19 @@ public:
 	}
 
 	int init(void) {
+
+		enable_radio();
+
+		return SUCCESS;
+	}
+
+	int init(Radio& radio, Timer& timer, Debug& debug, Clock& clock,
+			RandomNumber& random_number) {
+		radio_ = &radio;
+		timer_ = &timer;
+		debug_ = &debug;
+		clock_ = &clock;
+		random_number_ = &random_number;
 
 		enable_radio();
 
@@ -117,11 +111,13 @@ public:
 
 		radio().enable_radio();
 
-		radio().template reg_recv_callback<self_type, &self_type::receive>(
-				this);
+		random_number().srand(clock().time() * (3 * radio().id() + 2));
 
-		timer().template set_timer<self_type, &self_type::timer_elapsed>(15000,
-				this, 0);
+//		radio().template reg_recv_callback<self_type, &self_type::receive>(
+//				this);
+//
+//		timer().template set_timer<self_type, &self_type::timer_elapsed>(15000,
+//				this, 0);
 
 		return SUCCESS;
 	}
@@ -197,6 +193,34 @@ public:
 		return 1;
 	}
 
+	// insert the neighbor at any cost (if there is a room for it)
+	// even if eviction of a perfectly fine neighbor is called for
+	error_t command_LinkEstimator_insertNeighbor(node_id_t neighbor) {
+		uint8_t nidx;
+
+//		nidx = findIdx(neighbor);
+//		if (nidx != INVALID_RVAL) {
+//			trace()<<"insert: Found the entry, no need to insert";
+//			return SUCCESS;
+//		}
+//
+//		nidx = findEmptyNeighborIdx();
+//		if (nidx != INVALID_RVAL) {
+//			trace()<<"insert: inserted into the empty slot";
+//			initNeighborIdx(nidx, neighbor);
+//			return SUCCESS;
+//		} else {
+//			nidx = findWorstNeighborIdx(BEST_EETX);
+//			if (nidx != INVALID_RVAL) {
+//				trace()<<"insert: inserted by replacing an entry for neighbor: "<<(int)NeighborTable[nidx].ll_addr ;
+//				signal_LinkEstimator_evicted(NeighborTable[nidx].ll_addr) ;
+//				initNeighborIdx(nidx, neighbor);
+//				return SUCCESS;
+//			}
+//		}
+		return ERR_BUSY;
+	}
+
 	// pin a neighbor so that it does not get evicted
 	error_t command_LinkEstimator_pinNeighbor(node_id_t neighbor) {
 //			uint8_t nidx = findIdx(neighbor);
@@ -255,7 +279,7 @@ private:
 	typename Radio::self_pointer_t radio_;
 	typename Timer::self_pointer_t timer_;
 	typename Debug::self_pointer_t debug_;
-	typename Debug::self_pointer_t clock_;
+	typename Clock::self_pointer_t clock_;
 	typename RandomNumber::self_pointer_t random_number_;
 
 };

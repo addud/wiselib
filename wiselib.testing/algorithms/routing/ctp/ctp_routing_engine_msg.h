@@ -28,12 +28,10 @@
 #include "algorithms/routing/ctp/ctp_types.h"
 //#endif
 
-namespace wiselib
-{
+namespace wiselib {
 
 template<typename OsModel_P, typename Radio_P>
-class CtpRoutingEngineMsg
-{
+class CtpRoutingEngineMsg {
 public:
 	typedef OsModel_P OsModel;
 	typedef Radio_P Radio;
@@ -44,92 +42,83 @@ public:
 	// --------------------------------------------------------------------
 	inline CtpRoutingEngineMsg();
 	// --------------------------------------------------------------------
-	inline CtpRoutingEngineMsg( ctp_msg_options_t options, node_id_t parent,
-			ctp_msg_etx_t etx );
+	inline CtpRoutingEngineMsg(ctp_msg_options_t options, node_id_t parent,
+			ctp_msg_etx_t etx);
 	// --------------------------------------------------------------------
-	ctp_msg_options_t options()
-	{
-		return read<OsModel, block_data_t, ctp_msg_options_t> ( buffer
-				+ OPTIONS_POS );
+	ctp_msg_options_t options() {
+		return read<OsModel, block_data_t, ctp_msg_options_t>(
+				buffer + OPTIONS_POS);
 	}
 	;
 	// --------------------------------------------------------------------
-	void set_options( ctp_msg_options_t options )
-	{
-		write<OsModel, block_data_t, ctp_msg_options_t> ( buffer + OPTIONS_POS, options );
+	void set_options(ctp_msg_options_t options) {
+		write<OsModel, block_data_t, ctp_msg_options_t>(buffer + OPTIONS_POS,
+				options);
 	}
 	// --------------------------------------------------------------------
-	bool pull()
-	{
-		return (bool) ((read<OsModel, block_data_t, ctp_msg_options_t> ( buffer
-				+ OPTIONS_POS )) & CtpMsgOptRoutingPull);
+	bool pull() {
+		return (bool) ((read<OsModel, block_data_t, ctp_msg_options_t>(
+				buffer + OPTIONS_POS)) & CtpMsgOptRoutingPull);
 	}
 	// --------------------------------------------------------------------
-	void set_pull()
-	{
-		write<OsModel, block_data_t, ctp_msg_options_t> ( buffer + OPTIONS_POS, pull()
-				| CtpMsgOptRoutingPull );
+	void set_pull() {
+		ctp_msg_options_t new_value = pull() | CtpMsgOptRoutingPull;
+		write<OsModel, block_data_t, ctp_msg_options_t>(buffer + OPTIONS_POS,
+				new_value);
 	}
 	// --------------------------------------------------------------------
-	void clear_pull()
-	{
-		write<OsModel, block_data_t, ctp_msg_options_t> ( buffer + OPTIONS_POS, pull()
-				& ~CtpMsgOptRoutingPull );
+	void clear_pull() {
+		ctp_msg_options_t new_value = pull() & ~CtpMsgOptRoutingPull;
+		write<OsModel, block_data_t, ctp_msg_options_t>(buffer + OPTIONS_POS,
+				new_value);
 	}
 	// --------------------------------------------------------------------
-	bool congestion()
-	{
-		return (bool) ((read<OsModel, block_data_t, ctp_msg_options_t> ( buffer
-				+ OPTIONS_POS )) & CtpMsgOptCongestionNotification);
+	bool congestion() {
+		return (bool) ((read<OsModel, block_data_t, ctp_msg_options_t>(
+				buffer + OPTIONS_POS)) & CtpMsgOptCongestionNotification);
 	}
 	// --------------------------------------------------------------------
-	void set_congestion()
-	{
-		write<OsModel, block_data_t, ctp_msg_options_t> ( buffer + OPTIONS_POS, pull()
-				| CtpMsgOptCongestionNotification );
+	void set_congestion() {
+		ctp_msg_options_t new_value = pull() | CtpMsgOptCongestionNotification;
+		write<OsModel, block_data_t, ctp_msg_options_t>(buffer + OPTIONS_POS,
+				new_value);
 	}
 	// --------------------------------------------------------------------
-	void clear_congestion()
-	{
-		write<OsModel, block_data_t, ctp_msg_options_t> ( buffer + OPTIONS_POS, pull()
-				& ~CtpMsgOptCongestionNotification );
+	void clear_congestion() {
+		ctp_msg_options_t new_value = pull() & ~CtpMsgOptCongestionNotification;
+		write<OsModel, block_data_t, ctp_msg_options_t>(buffer + OPTIONS_POS,
+				new_value);
 	}
 	// --------------------------------------------------------------------
-	node_id_t parent()
-	{
-		return read<OsModel, block_data_t, node_id_t> ( buffer + PARENT_POS );
+	node_id_t parent() {
+		return read<OsModel, block_data_t, node_id_t>(buffer + PARENT_POS);
 	}
 	// --------------------------------------------------------------------
-	void set_parent( node_id_t parent )
-	{
-		write<OsModel, block_data_t, node_id_t> ( buffer + PARENT_POS, parent );
+	void set_parent(node_id_t parent) {
+		write<OsModel, block_data_t, node_id_t>(buffer + PARENT_POS, parent);
 	}
 	// --------------------------------------------------------------------
-	ctp_msg_etx_t etx()
-	{
-		return read<OsModel, block_data_t, ctp_msg_etx_t> ( buffer + ETX_POS );
+	ctp_msg_etx_t etx() {
+		return read<OsModel, block_data_t, ctp_msg_etx_t>(buffer + ETX_POS);
 	}
 	// --------------------------------------------------------------------
-	void set_etx( ctp_msg_etx_t etx )
-	{
-		write<OsModel, block_data_t, ctp_msg_etx_t> ( buffer + ETX_POS, etx );
+	void set_etx(ctp_msg_etx_t etx) {
+		write<OsModel, block_data_t, ctp_msg_etx_t>(buffer + ETX_POS, etx);
 	}
 	// --------------------------------------------------------------------
-	size_t buffer_size()
-	{
-		return sizeof(ctp_msg_options_t) + sizeof(node_id_t) + sizeof(ctp_msg_etx_t);
+	size_t buffer_size() {
+		return sizeof(ctp_msg_options_t) + sizeof(node_id_t)
+				+ sizeof(ctp_msg_etx_t);
 	}
 
 private:
-	enum data_positions
-	{
+	enum data_positions {
 		OPTIONS_POS = 0,
 		PARENT_POS = OPTIONS_POS + sizeof(ctp_msg_options_t),
 		ETX_POS = PARENT_POS + sizeof(node_id_t)
 	};
 
-	enum CtpOptionsMasks
-	{
+	enum CtpOptionsMasks {
 		CtpMsgOptRoutingPull = 0x80, // Flag to request routing information
 		CtpMsgOptCongestionNotification = 0x40
 	// Flag to signal congestion
@@ -140,17 +129,15 @@ private:
 };
 // -----------------------------------------------------------------------
 template<typename OsModel_P, typename Radio_P>
-CtpRoutingEngineMsg<OsModel_P, Radio_P>::CtpRoutingEngineMsg()
-{
+CtpRoutingEngineMsg<OsModel_P, Radio_P>::CtpRoutingEngineMsg() {
 }
 // -----------------------------------------------------------------------
 template<typename OsModel_P, typename Radio_P>
 CtpRoutingEngineMsg<OsModel_P, Radio_P>::CtpRoutingEngineMsg(
-		ctp_msg_options_t options, node_id_t parent, ctp_msg_etx_t etx )
-{
-	set_options( options );
-	set_parent( parent );
-	set_etx( etx );
+		ctp_msg_options_t options, node_id_t parent, ctp_msg_etx_t etx) {
+	set_options(options);
+	set_parent(parent);
+	set_etx(etx);
 }
 
 }
