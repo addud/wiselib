@@ -68,13 +68,13 @@ public:
 	void set_pull()
 	{
 		write<OsModel, block_data_t, ctp_msg_options_t> ( buffer + OPTIONS_POS, pull()
-				|= CtpMsgOptRoutingPull );
+				| CtpMsgOptRoutingPull );
 	}
 	// --------------------------------------------------------------------
 	void clear_pull()
 	{
 		write<OsModel, block_data_t, ctp_msg_options_t> ( buffer + OPTIONS_POS, pull()
-				&= ~CtpMsgOptRoutingPull );
+				& ~CtpMsgOptRoutingPull );
 	}
 	// --------------------------------------------------------------------
 	bool congestion()
@@ -86,13 +86,13 @@ public:
 	void set_congestion()
 	{
 		write<OsModel, block_data_t, ctp_msg_options_t> ( buffer + OPTIONS_POS, pull()
-				|= CtpMsgOptCongestionNotification );
+				| CtpMsgOptCongestionNotification );
 	}
 	// --------------------------------------------------------------------
 	void clear_congestion()
 	{
 		write<OsModel, block_data_t, ctp_msg_options_t> ( buffer + OPTIONS_POS, pull()
-				&= ~CtpMsgOptCongestionNotification );
+				& ~CtpMsgOptCongestionNotification );
 	}
 	// --------------------------------------------------------------------
 	node_id_t parent()

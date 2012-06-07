@@ -25,28 +25,22 @@
 
 namespace wiselib {
 
-template<typename OsModel_P, typename RoutingTable_P,
+template<typename OsModel_P, typename RandomNumber_P,
 		typename Radio_P = typename OsModel_P::Radio,
 		typename Timer_P = typename OsModel_P::Timer,
 		typename Debug_P = typename OsModel_P::Debug>
 class CtpLinkEstimator: public RoutingBase<OsModel_P, Radio_P> {
 public:
 	typedef OsModel_P OsModel;
+	typedef RandomNumber_P RandomNumber;
 	typedef Radio_P Radio;
-	typedef typename OsModel::Timer Timer;
-	typedef typename OsModel::Debug Debug;
+	typedef Timer_P Timer;
+	typedef Debug_P Debug;
 	typedef typename OsModel::Clock Clock;
-	typedef typename OsModel::RandomNumber RandomNumber;
 
-	typedef RoutingTable_P RoutingTable;
-	typedef typename RoutingTable::iterator RoutingTableIterator;
-	typedef typename RoutingTable::mapped_type RoutingTableValue;
-	typedef typename RoutingTable::value_type RoutingTableEntry;
 
-	typedef typename RoutingTableValue::Path Path;
-	typedef typename Path::iterator PathIterator;
 
-	typedef CtpLinkEstimator<OsModel, RoutingTable, Radio> self_type;
+	typedef CtpLinkEstimator<OsModel, Radio> self_type;
 	typedef self_type* self_pointer_t;
 
 	typedef typename Radio::node_id_t node_id_t;
@@ -96,34 +90,6 @@ public:
 	}
 	///@}
 
-private:
-
-	Radio& radio() {
-		return *radio_;
-	}
-
-	Timer& timer() {
-		return *timer_;
-	}
-
-	Debug& debug() {
-		return *debug_;
-	}
-
-	Clock& clock() {
-		return *clock_;
-	}
-
-	RandomNumber& random_number() {
-		return *random_number_;
-	}
-
-	typename Radio::self_pointer_t radio_;
-	typename Timer::self_pointer_t timer_;
-	typename Debug::self_pointer_t debug_;
-	typename Debug::self_pointer_t clock_;
-	typename RandomNumber::self_pointer_t random_number_;
-
 	CtpLinkEstimator() {
 	}
 
@@ -170,7 +136,6 @@ private:
 	}
 
 	int send(node_id_t destination, size_t len, block_data_t *data) {
-
 		//	RoutingTableIterator it = routing_table_.find(destination);
 		//	if (it != routing_table_.end()) {
 		//		routing_message_.set_path(it->second.path);
@@ -217,8 +182,7 @@ private:
 	 * LinkEstimator Interface -------------------------------------------------------------
 	 */
 	// return bi-directional link quality to the neighbor
-	uint16_t command_LinkEstimator_getLinkQuality(
-			node_id_t neighbor) {
+	uint16_t command_LinkEstimator_getLinkQuality(node_id_t neighbor) {
 //		uint8_t idx;
 //		idx = findIdx(neighbor);
 //		if (idx == INVALID_RVAL) {
@@ -252,6 +216,47 @@ private:
 //		NeighborTable[nidx].flags &= ~PINNED_ENTRY;
 		return SUCCESS;
 	}
+
+	// called when the parent changes; clear state about data-driven link quality
+	error_t command_LinkEstimator_clearDLQ(node_id_t neighbor) {
+//		neighbor_table_entry_t *ne;
+//		uint8_t nidx = findIdx(neighbor);
+//		if (nidx == INVALID_RVAL) {
+//			return FAIL;
+//		}
+//		ne = &NeighborTable[nidx];
+//		ne->data_total = 0;
+//		ne->data_success = 0;
+		return SUCCESS;
+	}
+
+private:
+
+	Radio& radio() {
+		return *radio_;
+	}
+
+	Timer& timer() {
+		return *timer_;
+	}
+
+	Debug& debug() {
+		return *debug_;
+	}
+
+	Clock& clock() {
+		return *clock_;
+	}
+
+	RandomNumber& random_number() {
+		return *random_number_;
+	}
+
+	typename Radio::self_pointer_t radio_;
+	typename Timer::self_pointer_t timer_;
+	typename Debug::self_pointer_t debug_;
+	typename Debug::self_pointer_t clock_;
+	typename RandomNumber::self_pointer_t random_number_;
 
 };
 }
