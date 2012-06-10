@@ -51,15 +51,21 @@ public:
 
 	void srand(uint32_t dummy) {
 #ifdef SHAWN
-		srand(time(NULL) * (3 * radio().id() + 2));
+		//TODO: This causes segmentation error: need to be solved
+//		srand(time(NULL) * (3 * radio().id() + 2));
 #endif
 	}
 
 	value_t rand(value_t max_value) {
 #ifdef SHAWN
-		return rand(max_value);
+		return 2;
+		//TODO: This causes segmentation error: need to be solved
+//		return (value_t) clock().time() % max_value;
+		//TODO: This causes segmentation error: need to be solved
+//		return rand(max_value);
 #else
-		return this->clock().time() % max_value;
+		//TODO: This causes segmentation error: need to be solved
+		return clock().time() % max_value;
 #endif
 		return RANDOM_MAX;
 	}

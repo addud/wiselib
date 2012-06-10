@@ -22,8 +22,8 @@ public:
 		clock_ = &wiselib::FacetProvider<Os, Os::Clock>::get_facet(value);
 
 
-		re_.init();
-//		re_.init(*radio_, *timer_, *debug_, *clock_, *random_number_);
+//		re_.init();
+		re_.init(*radio_, *timer_, *debug_, *clock_, *random_number_);
 
 		debug_->debug("Hello World from Example Application!\n");
 
