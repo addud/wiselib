@@ -236,8 +236,7 @@ public:
 		return SUCCESS;
 	}
 
-	int destruct(void);
-	{
+	int destruct(void) {
 		return disable_radio();
 	}
 
