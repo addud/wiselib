@@ -25,6 +25,16 @@
 
 namespace wiselib {
 
+//class CtpLink {
+//public:
+//	uint16_t caca() {
+//		return 1;
+//
+//	}
+//private:
+//
+//};
+
 template<typename OsModel_P, typename RandomNumber_P,
 		typename Radio_P = typename OsModel_P::Radio,
 		typename Timer_P = typename OsModel_P::Timer,
@@ -71,6 +81,8 @@ public:
 	};
 	// --------------------------------------------------------------------
 
+	uint16_t link_quality;
+
 	CtpLinkEstimator() {
 	}
 
@@ -94,6 +106,37 @@ public:
 		debug_ = &debug;
 		clock_ = &clock;
 		random_number_ = &random_number;
+
+		switch (radio_->id()) {
+		case 0:
+			link_quality = 2;
+			break;
+		case 1:
+			link_quality = 3;
+			break;
+		case 2:
+			link_quality = 4;
+			break;
+		case 3:
+			link_quality = 3;
+			break;
+		case 4:
+			link_quality = 2;
+			break;
+		case 5:
+			link_quality = 1;
+			break;
+		case 6:
+			link_quality = 0;
+			break;
+		case 7:
+			link_quality = 1;
+			break;
+		default:
+			link_quality = 100;
+			break;
+		}
+
 
 		enable_radio();
 
@@ -129,6 +172,10 @@ public:
 
 	void timer_elapsed(void *userdata) {
 
+	}
+
+	uint16_t caca(node_id_t neighbor) {
+		return 1;
 	}
 
 	int send(node_id_t destination, size_t len, block_data_t *data) {
@@ -174,6 +221,10 @@ public:
 		}
 	}
 
+	error_t command_Send_send(node_id_t dest, size_t len, block_data_t *data ) {
+		return radio().send(dest, len, data);
+	}
+
 	/*
 	 * LinkEstimator Interface -------------------------------------------------------------
 	 */
@@ -190,6 +241,7 @@ public:
 //				return VERY_LARGE_EETX_VALUE;
 //			}
 //		}
+//		debug().debug("%d: link quality: %d\n",radio().id(),link_quality);
 		return 1;
 	}
 
