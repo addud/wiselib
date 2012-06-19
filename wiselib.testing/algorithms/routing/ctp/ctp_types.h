@@ -17,6 +17,10 @@
  ** If not, see <http://www.gnu.org/licenses/>.                           **
  ***************************************************************************/
 
+/*
+ * Author: Adrian Dudau <adrian@vermisoft.ro>
+ */
+
 #ifndef CTP_TYPES_H_
 #define CTP_TYPES_H_
 

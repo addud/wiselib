@@ -4,6 +4,7 @@
 #include "external_interface/external_interface.h"
 #include "algorithms/routing/ctp/ctp_routing_engine.h"
 #include "algorithms/routing/ctp/ctp_routing_table_value.h"
+#include "algorithms/routing/ctp/ctp_random_number.h"
 #include "internal_interface/routing_table/routing_table_static_array.h"
 #include "util/base_classes/routing_base.h"
 
