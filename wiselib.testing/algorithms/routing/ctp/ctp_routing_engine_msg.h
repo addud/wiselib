@@ -28,7 +28,7 @@
 
 namespace wiselib {
 
-	template<typename OsModel_P, typename Radio_P>
+	template<typename OsModel_P, typename Radio_P, unsigned int MAX_MESSAGE_OVERHEAD>
 	class CtpRoutingEngineMsg {
 	public:
 		typedef OsModel_P OsModel;
@@ -133,8 +133,8 @@ namespace wiselib {
 		};
 
 		// -----------------------------------------------------------------------
-
-		block_data_t buffer[Radio::MAX_MESSAGE_LENGTH];
+		//TODO: allocate only needed memory  aka 5 bytes
+		block_data_t buffer[MAX_MESSAGE_OVERHEAD];
 
 	};
 

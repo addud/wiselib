@@ -24,6 +24,7 @@
 #ifndef __CTP_RANDOM_NUMBER_H__
 #define __CTP_RANDOM_NUMBER_H__
 
+
 #include <limits.h>
 
 namespace wiselib {
@@ -80,7 +81,7 @@ namespace wiselib {
 			//		return rand(max_value);
 #else
 			//TODO: This causes segmentation error: need to be solved
-			return clock().time() % max_value;
+			return clock().milliseconds(clock().time()) % max_value;
 #endif
 			return RANDOM_MAX;
 		}

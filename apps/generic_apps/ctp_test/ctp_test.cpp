@@ -13,7 +13,7 @@ typedef wiselib::OSMODEL Os;
 typedef wiselib::CtpRoutingTableValue<Os::Radio> RoutingTableValue;
 typedef wiselib::StaticArrayRoutingTable<Os, Os::Radio, 10, RoutingTableValue> RoutingTable;
 typedef wiselib::CtpRandomNumber<Os> RandomNumber;
-typedef wiselib::CtpLinkEstimator<Os, RandomNumber, Os::Radio, Os::Timer,
+typedef wiselib::CtpLinkEstimator<Os, RoutingTable, RandomNumber, Os::Radio, Os::Timer,
 		Os::Debug, Os::Clock> LinkEstimator;
 typedef wiselib::CtpRoutingEngine<Os, RoutingTable, RandomNumber, LinkEstimator> RoutingEngine;
 
@@ -26,12 +26,12 @@ public:
 		clock_ = &wiselib::FacetProvider<Os, Os::Clock>::get_facet(value);
 
 		le_.init(*radio_, *timer_, *debug_, *clock_, *random_number_);
-	re_.init(le_, *timer_, *debug_, *clock_, *random_number_);
+		re_.init(le_, *timer_, *debug_, *clock_, *random_number_);
 
 //		debug_->debug("Node %d started\n",radio_->id());
 
-//		re_->reg_event_callback<CtpTest,
-//						&CtpTest::event>(this);
+		re_.reg_event_callback<CtpTest,
+						&CtpTest::event>(this);
 		re_.reg_recv_callback<CtpTest, &CtpTest::receive_radio_message>(
 				this);
 		timer_->set_timer<CtpTest, &CtpTest::start>(5000, this, 0);
