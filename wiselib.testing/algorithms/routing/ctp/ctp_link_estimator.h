@@ -56,7 +56,13 @@ namespace wiselib {
 		typedef typename Clock::time_t time_t;
 		typedef typename RandomNumber::value_t value_t;
 
-		typedef CtpRoutingEngineMsg<OsModel, Radio> RoutingMessage;
+	      typedef delegate3<void, node_id_t, size_t, block_data_t*> radio_delegate_t;
+	      typedef vector_static<OsModel, radio_delegate_t, RADIO_BASE_MAX_RECEIVERS> RecvCallbackVector;
+	      typedef typename RecvCallbackVector::iterator RecvCallbackVectorIterator;
+
+		typedef delegate1<void, uint8_t> notify_delegate_t;
+		typedef vector_static<OsModel, notify_delegate_t, MAX_EVENT_RECEIVERS> EventCallbackVector;
+		typedef typename EventCallbackVector::iterator EventCallbackVectorIterator;
 
 		// --------------------------------------------------------------------
 
@@ -111,12 +117,12 @@ namespace wiselib {
 
 		int init(Radio& radio, Timer& timer, Debug& debug, Clock& clock,
 			RandomNumber& random_number) {
+
 				radio_ = &radio;
 				timer_ = &timer;
 				debug_ = &debug;
 				clock_ = &clock;
 				random_number_ = &random_number;
-
 				switch (radio_->id()) {
 				case 0:
 					link_quality = 2;
@@ -146,8 +152,6 @@ namespace wiselib {
 					link_quality = 100;
 					break;
 				}
-
-
 				enable_radio();
 
 				return SUCCESS;
@@ -161,6 +165,9 @@ namespace wiselib {
 #endif
 
 			radio().enable_radio();
+
+			radio().reg_recv_callback<CtpLinkEstimator, &CtpLinkEstimator::receive>(
+					this);
 
 			random_number().srand(clock().time() * (3 * radio().id() + 2));
 
@@ -178,6 +185,12 @@ namespace wiselib {
 		int disable_radio(void) {
 
 			return SUCCESS;
+		}
+
+		// ----------------------------------------------------------------------------------
+
+		node_id_t id() {
+			return radio_->id();
 		}
 
 		// -----------------------------------------------------------------------
@@ -204,6 +217,30 @@ namespace wiselib {
 
 			return SUCCESS;
 		}
+
+	      template<class T, void (T::*TMethod)(node_id_t, size_t, block_data_t*)>
+	      int reg_recv_callback( T *obj_pnt )
+	      {
+	         if ( recv_callbacks_.empty() )
+	            recv_callbacks_.assign( RADIO_BASE_MAX_RECEIVERS, radio_delegate_t() );
+
+	         for ( unsigned int i = 0; i < recv_callbacks_.size(); ++i )
+	         {
+	            if ( recv_callbacks_.at(i) == radio_delegate_t() )
+	            {
+	               recv_callbacks_.at(i) = radio_delegate_t::template from_method<T, TMethod>( obj_pnt );
+	               return i;
+	            }
+	         }
+
+	         return -1;
+	      }
+	      // --------------------------------------------------------------------
+	      int unreg_recv_callback( int idx )
+	      {
+	         recv_callbacks_.at(idx) = radio_delegate_t();
+	         return SUCCESS;
+	      }
 
 		// -----------------------------------------------------------------------
 
@@ -303,6 +340,34 @@ namespace wiselib {
 
 		// -----------------------------------------------------------------------
 
+		// ----------------------------------------------------------------------------------
+
+		template<class T, void(T::*TMethod)(uint8_t) >
+		uint8_t reg_event_callback(T *obj_pnt) {
+
+			if (event_callbacks_.empty())
+				event_callbacks_.assign(MAX_EVENT_RECEIVERS, notify_delegate_t());
+
+			for (EventCallbackVectorIterator
+				it = event_callbacks_.begin();
+				it != event_callbacks_.end();
+			it++) {
+				if ((*it) == notify_delegate_t()) {
+					(*it) = notify_delegate_t::template from_method<T, TMethod > (obj_pnt);
+					return 0;
+				}
+			}
+
+			return -1;
+		}
+
+		// ----------------------------------------------------------------------------------
+
+		int unreg_event_callback(int idx) {
+			event_callbacks_.at(idx) = notify_delegate_t();
+			return idx;
+		}
+
 	private:
 
 		typename Radio::self_pointer_t radio_;
@@ -310,6 +375,9 @@ namespace wiselib {
 		typename Debug::self_pointer_t debug_;
 		typename Clock::self_pointer_t clock_;
 		typename RandomNumber::self_pointer_t random_number_;
+
+		RecvCallbackVector recv_callbacks_;
+		EventCallbackVector event_callbacks_;
 
 		// -----------------------------------------------------------------------
 
@@ -333,6 +401,32 @@ namespace wiselib {
 			return *random_number_;
 		}
 
+	      // --------------------------------------------------------------------
+	      void notify_receivers( node_id_t from, size_t len, block_data_t *data )
+	      {
+	         for ( RecvCallbackVectorIterator
+	                  it = recv_callbacks_.begin();
+	                  it != recv_callbacks_.end();
+	                  ++it )
+	         {
+	            if ( *it != radio_delegate_t() )
+	               (*it)( from, len, data );
+	         }
+	      }
+
+		// ----------------------------------------------------------------------------------
+
+		void notify_listeners(uint8_t event) {
+			for (EventCallbackVectorIterator it = event_callbacks_.begin();
+				it != event_callbacks_.end(); ++it) {
+					if (*it != notify_delegate_t()) {
+						(*it)(event);
+						echo("RE notified: %d\n",it);
+					}
+
+			}
+		}
+
 		// -----------------------------------------------------------------------
 
 		void timer_elapsed(void *userdata) {
@@ -342,23 +436,7 @@ namespace wiselib {
 		// -----------------------------------------------------------------------
 
 		void receive(node_id_t from, size_t len, block_data_t *data) {
-			message_id_t msg_id = read<OsModel, block_data_t, message_id_t>(data);
-			if (msg_id) {
-				// RouteDiscoveryMessage *message =
-				// reinterpret_cast<RouteDiscoveryMessage*> ( data );
-				// handle_route_request( from, *message );
-				// }
-				// else if (msg_id == DsrRouteReplyMsgId)
-				// {
-				// RouteDiscoveryMessage *message =
-				// reinterpret_cast<RouteDiscoveryMessage*> ( data );
-				// handle_route_reply( from, *message );
-				// }
-				// else if (msg_id == ReMsgId)
-				// {
-				RoutingMessage *message = reinterpret_cast<RoutingMessage*>(data);
-				handle_routing_message(from, len, *message);
-			}
+			notify_receivers(from, len, data);
 		}
 
 		// -----------------------------------------------------------------------

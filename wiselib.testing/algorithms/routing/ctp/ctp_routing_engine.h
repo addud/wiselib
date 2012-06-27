@@ -26,7 +26,6 @@
 
 #include "util/base_classes/routing_base.h"
 #include "algorithms/routing/ctp/ctp_routing_engine_msg.h"
-#include "algorithms/routing/ctp/ctp_link_estimator.h"
 #include "algorithms/routing/ctp/ctp_types.h"
 
 //Uncomment to enable general debug messages
@@ -72,13 +71,15 @@ namespace wiselib {
 		typedef typename RandomNumber::value_t value_t;
 
 		typedef CtpRoutingEngineMsg<OsModel, Radio> RoutingMessage;
-		typedef wiselib::CtpLinkEstimator<OsModel, RandomNumber, Radio, Timer,
-			Debug, Clock> LinkEstimator;
 
-		typedef delegate1<void, uint8_t> notify_delegate_t;
+	      typedef delegate3<void, node_id_t, size_t, block_data_t*> radio_delegate_t;
+	      typedef vector_static<OsModel, radio_delegate_t, RADIO_BASE_MAX_RECEIVERS> RecvCallbackVector;
+	      typedef typename RecvCallbackVector::iterator RecvCallbackVectorIterator;
 
-		typedef vector_static<OsModel, notify_delegate_t, MAX_EVENT_RECEIVERS> NotifyCallbackVector;
-		typedef typename NotifyCallbackVector::iterator NotifyCallbackVectorIterator;
+			typedef delegate1<void, uint8_t> notify_delegate_t;
+			typedef vector_static<OsModel, notify_delegate_t, MAX_EVENT_RECEIVERS> EventCallbackVector;
+			typedef typename EventCallbackVector::iterator EventCallbackVectorIterator;
+
 
 		// --------------------------------------------------------------------
 
@@ -179,9 +180,9 @@ namespace wiselib {
 
 			radio().enable_radio();
 
+			radio().reg_recv_callback<CtpRoutingEngine, &CtpRoutingEngine::receive>(
+					this);
 			routeInfoInit(&routeInfo);
-
-			le.init(*radio_, *timer_, *debug_, *clock_, *random_number_);
 
 			// Call the corresponding rootcontrol command
 			isRoot ?
@@ -209,6 +210,12 @@ namespace wiselib {
 #endif
 
 			return command_StdControl_stop();
+		}
+
+		// ----------------------------------------------------------------------------------
+
+		node_id_t id() {
+			return radio_->id();
 		}
 
 		// --------------------------------------------------------------------
@@ -241,6 +248,33 @@ namespace wiselib {
 			return SUCCESS;
 		}
 
+	      template<class T, void (T::*TMethod)(node_id_t, size_t, block_data_t*)>
+	      int reg_recv_callback( T *obj_pnt )
+	      {
+	         if ( recv_callbacks_.empty() )
+	            recv_callbacks_.assign( RADIO_BASE_MAX_RECEIVERS, radio_delegate_t() );
+
+	         for ( unsigned int i = 0; i < recv_callbacks_.size(); ++i )
+	         {
+	            if ( recv_callbacks_.at(i) == radio_delegate_t() )
+	            {
+	               recv_callbacks_.at(i) = radio_delegate_t::template from_method<T, TMethod>( obj_pnt );
+	               return i;
+	            }
+	         }
+
+	         return -1;
+	      }
+	      // --------------------------------------------------------------------
+	      int unreg_recv_callback( int idx )
+	      {
+	         recv_callbacks_.at(idx) = radio_delegate_t();
+	         return SUCCESS;
+	      }
+
+
+
+
 		// --------------------------------------------------------------------
 
 		/*
@@ -268,7 +302,7 @@ namespace wiselib {
 				*etx = 0;
 			} else {
 				// path etx = etx(parent) + etx(link to the parent)
-				*etx = routeInfo.etx + evaluateEtx(le.command_LinkEstimator_getLinkQuality(routeInfo.parent) );
+				*etx = routeInfo.etx + evaluateEtx(radio().command_LinkEstimator_getLinkQuality(routeInfo.parent) );
 			}
 			return SUCCESS;
 		}
@@ -333,9 +367,7 @@ namespace wiselib {
 			routeInfo.parent = self; //myself
 			routeInfo.etx = 0;
 			if (route_found) {
-
-				//TODO: Implement callback to Forward Engine
-				//			signal_Routing_routeFound();
+							signal_Routing_routeFound();
 			}
 #ifdef ROUTING_ENGINE_DEBUG
 			debug().debug("%d: ", self);
@@ -370,12 +402,12 @@ namespace wiselib {
 		template<class T, void(T::*TMethod)(uint8_t) >
 		uint8_t reg_event_callback(T *obj_pnt) {
 
-			if (notify_callbacks_.empty())
-				notify_callbacks_.assign(MAX_EVENT_RECEIVERS, notify_delegate_t());
+			if (event_callbacks_.empty())
+				event_callbacks_.assign(MAX_EVENT_RECEIVERS, notify_delegate_t());
 
-			for (NotifyCallbackVectorIterator
-				it = notify_callbacks_.begin();
-				it != notify_callbacks_.end();
+			for (EventCallbackVectorIterator
+				it = event_callbacks_.begin();
+				it != event_callbacks_.end();
 			it++) {
 				if ((*it) == notify_delegate_t()) {
 					(*it) = notify_delegate_t::template from_method<T, TMethod > (obj_pnt);
@@ -389,7 +421,7 @@ namespace wiselib {
 		// ----------------------------------------------------------------------------------
 
 		int unreg_event_callback(int idx) {
-			notify_callbacks_.at(idx) = notify_delegate_t();
+			event_callbacks_.at(idx) = notify_delegate_t();
 			return idx;
 		}
 
@@ -412,16 +444,11 @@ namespace wiselib {
 
 		// ----------------------------------------------------------------------------------
 
-
-
 		static const char * timeout_period_message_[];
 		static const unsigned debug_nodes_[DEBUG_NODES_NR];
 		static const unsigned root_nodes_[ROOT_NODES_NR];
 
-
 				// --------------------------------------------------------------------
-
-		LinkEstimator le;
 
 		bool ECNOff;
 		bool radioOn;
@@ -452,8 +479,8 @@ namespace wiselib {
 		bool isRoot;
 
 
-
-		NotifyCallbackVector notify_callbacks_;
+        RecvCallbackVector recv_callbacks_;
+		EventCallbackVector event_callbacks_;
 
 		// ----------------------------------------------------------------------------------
 
@@ -475,12 +502,6 @@ namespace wiselib {
 
 		RandomNumber& random_number() {
 			return *random_number_;
-		}
-
-		// ----------------------------------------------------------------------------------
-
-		node_id_t id() {
-			return radio_->id();
 		}
 
 		// ----------------------------------------------------------------------------------
@@ -511,12 +532,28 @@ namespace wiselib {
 			state_is_root = false;
 		}
 
+	      // --------------------------------------------------------------------
+	      void notify_receivers( node_id_t from, size_t len, block_data_t *data )
+	      {
+	         for ( RecvCallbackVectorIterator
+	                  it = recv_callbacks_.begin();
+	                  it != recv_callbacks_.end();
+	                  ++it )
+	         {
+	            if ( *it != radio_delegate_t() )
+	               (*it)( from, len, data );
+	         }
+	      }
+
 		// ----------------------------------------------------------------------------------
 
 		void notify_listeners(uint8_t event) {
-			for (NotifyCallbackVectorIterator it = notify_callbacks_.begin();
-				it != notify_callbacks_.end(); ++it) {
-					if (*it != notify_delegate_t()) (*it)(event);
+			for (EventCallbackVectorIterator it = event_callbacks_.begin();
+				it != event_callbacks_.end(); ++it) {
+					if (*it != notify_delegate_t()) {
+						(*it)(event);
+						echo("notified: %d\n",it);
+					}
 
 			}
 		}
@@ -734,7 +771,7 @@ namespace wiselib {
 
 				/* Compute this neighbor's path metric */
 				linkEtx = evaluateEtx(
-					le.command_LinkEstimator_getLinkQuality(it->first));
+					radio().command_LinkEstimator_getLinkQuality(it->first));
 
 #ifdef ROUTING_ENGINE_DEBUG
 				debug().debug("%d: ", self);
@@ -804,9 +841,9 @@ namespace wiselib {
 							debug().debug("Changed parent from %d to %d",
 								(int) routeInfo.parent, (int) best->first);
 #endif
-							le.command_LinkEstimator_unpinNeighbor(routeInfo.parent);
-							le.command_LinkEstimator_pinNeighbor(best->first);
-							le.command_LinkEstimator_clearDLQ(best->first);
+							radio().command_LinkEstimator_unpinNeighbor(routeInfo.parent);
+							radio().command_LinkEstimator_pinNeighbor(best->first);
+							radio().command_LinkEstimator_clearDLQ(best->first);
 
 							routeInfo.parent = best->first;
 							routeInfo.etx = best->second.etx;
@@ -823,7 +860,6 @@ namespace wiselib {
 			/* We can only loose a route to a parent if it has been evicted. If it hasn't
 			* been just evicted then we already did not have a route */
 			if (justEvicted && routeInfo.parent == INVALID_ADDR) {
-				//TODO Callback to FE to signal no route found
 				signal_Routing_noRoute();
 			}
 			/* On the other hand, if we didn't have a parent (no currentEtx) and now we
@@ -832,8 +868,7 @@ namespace wiselib {
 			* case */
 			else if (!justEvicted && currentEtx == MAX_METRIC
 				&& minEtx != MAX_METRIC) {
-					//TODO Callback to FE to signal route found
-					//			signal_Routing_routeFound();
+								signal_Routing_routeFound();
 			}
 			justEvicted = false;
 		}
@@ -841,25 +876,10 @@ namespace wiselib {
 		// ----------------------------------------------------------------------------------
 
 		void receive(node_id_t from, size_t len, block_data_t *data) {
-			// RouteDiscoveryMessage *message =
-			// reinterpret_cast<RouteDiscoveryMessage*> ( data );
-			// handle_route_request( from, *message );
-			// }
-			// else if (msg_id == DsrRouteReplyMsgId)
-			// {
-			// RouteDiscoveryMessage *message =
-			// reinterpret_cast<RouteDiscoveryMessage*> ( data );
-			// handle_route_reply( from, *message );
-			// }
-			// else if (msg_id == ReMsgId)
-			// {
-			RoutingMessage *message = reinterpret_cast<RoutingMessage*>(data);
+			notify_receivers(from, len, data);
 
+			RoutingMessage *message = reinterpret_cast<RoutingMessage*>(data);
 			event_BeaconReceive_receive(from, message);
-			//		debug().debug("%d  message is %s\n",id(),data);
-			//			debug().debug("%d: ", self);
-			//			debug().debug("node: %d received message from %d\n", self,
-			//					from);
 
 			//TODO: implement logic for forwarding messages destinated to the FE
 		}
@@ -883,7 +903,7 @@ namespace wiselib {
 			beaconMsg.set_options(0);
 
 			/* Congestion notification: am I congested? */
-			//TODO Callback to FE
+			//TODO: Needs to be done from the FE
 			//		if (cfe->command_CtpCongestion_isCongested()) {
 			//			beaconMsg.set_congestion();
 			//		}
@@ -898,7 +918,7 @@ namespace wiselib {
 				beaconMsg.set_etx(
 					routeInfo.etx
 					+ evaluateEtx(
-					le.command_LinkEstimator_getLinkQuality(
+							radio().command_LinkEstimator_getLinkQuality(
 					routeInfo.parent)));
 			}
 
@@ -909,12 +929,12 @@ namespace wiselib {
 #endif
 
 			//TODO: Call LE send command
-			eval = le.command_Send_send(BROADCAST_ADDRESS, beaconMsg.buffer_size(),
+			eval = radio().command_Send_send(BROADCAST_ADDRESS, beaconMsg.buffer_size(),
 				(block_data_t*) &beaconMsg); // the duplicate will be deleted in the LE module, we keep a copy here that is reused each time.
 
 			if (eval == SUCCESS) {
-				echo("beacon sent - parent: %d etx: %d", (int) beaconMsg.parent(),
-					(int) beaconMsg.etx());
+//				echo("beacon sent - parent: %d etx: %d", (int) beaconMsg.parent(),
+//					(int) beaconMsg.etx());
 			} else {
 				radioOn = false;
 #ifdef ROUTING_ENGINE_DEBUG
@@ -990,8 +1010,8 @@ namespace wiselib {
 					debug().debug("from a root, inserting if not in table");
 #endif
 
-					le.command_LinkEstimator_insertNeighbor(from);
-					le.command_LinkEstimator_pinNeighbor(from);
+					radio().command_LinkEstimator_insertNeighbor(from);
+					radio().command_LinkEstimator_pinNeighbor(from);
 
 				}
 				//TODO: also, if better than my current parent's path etx, insert
@@ -1025,7 +1045,7 @@ namespace wiselib {
 			uint16_t etx) {
 				RoutingTableIterator it;
 				uint16_t linkEtx;
-				linkEtx = evaluateEtx(le.command_LinkEstimator_getLinkQuality(from));
+				linkEtx = evaluateEtx(radio().command_LinkEstimator_getLinkQuality(from));
 
 				it = routingTable.find(from);
 				if ((it == routingTable.end())
@@ -1083,10 +1103,12 @@ namespace wiselib {
 		void signal_Routing_routeFound(){
 			//TODO: signal route found to FE
 			//cfe->event_UnicastNameFreeRouting_routeFound() ;
+			notify_listeners(EVENT_ROUTE_FOUND);
 		}
 		void signal_Routing_noRoute(){
 			//TODO: signal route not found to FE
 			//cfe->event_UnicastNameFreeRouting_routeFound() ;
+			notify_listeners(EVENT_ROUTE_NOT_FOUND);
 		}
 
 		// ----------------------------------------------------------------------------------
