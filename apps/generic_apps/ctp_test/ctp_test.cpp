@@ -13,8 +13,8 @@ typedef wiselib::OSMODEL Os;
 typedef wiselib::CtpRoutingTableValue<Os::Radio> RoutingTableValue;
 typedef wiselib::StaticArrayRoutingTable<Os, Os::Radio, 10, RoutingTableValue> RoutingTable;
 typedef wiselib::CtpRandomNumber<Os> RandomNumber;
-typedef wiselib::CtpLinkEstimator<Os, RoutingTable, RandomNumber, Os::Radio, Os::Timer,
-		Os::Debug, Os::Clock> LinkEstimator;
+typedef wiselib::CtpLinkEstimator<Os, RoutingTable, RandomNumber, Os::Radio,
+		Os::Timer, Os::Debug, Os::Clock> LinkEstimator;
 typedef wiselib::CtpRoutingEngine<Os, RoutingTable, RandomNumber, LinkEstimator> RoutingEngine;
 
 class CtpTest {
@@ -27,35 +27,42 @@ public:
 
 		le_.init(*radio_, *timer_, *debug_, *clock_, *random_number_);
 		re_.init(le_, *timer_, *debug_, *clock_, *random_number_);
+		re_.enable_radio();
 
 //		debug_->debug("Node %d started\n",radio_->id());
 
-		re_.reg_event_callback<CtpTest,
-						&CtpTest::event>(this);
-		re_.reg_recv_callback<CtpTest, &CtpTest::receive_radio_message>(
-				this);
-		timer_->set_timer<CtpTest, &CtpTest::start>(5000, this, 0);
+//		re_.reg_event_callback < CtpTest, &CtpTest::event > (this);
+		re_.reg_recv_callback < CtpTest, &CtpTest::receive_radio_message
+				> (this);
 
+		if (radio_->id() ==2) {
+			timer_->set_timer<CtpTest, &CtpTest::start>(12000, this, 0);
+		}
 	}
 	// --------------------------------------------------------------------
 	void start(void*) {
 //		debug_->debug("broadcast message at %d \n", radio_->id());
-		Os::Radio::block_data_t message[] = "hello world!\0";
-//		radio_->send(Os::Radio::BROADCAST_ADDRESS, sizeof(message), message);
+		Os::Radio::block_data_t message[] = "ac\0";
+		re_.send(re_.command_Routing_nextHop(), sizeof(message), message);
 
 // following can be used for periodic messages to sink
-// timer_->set_timer<ExampleApplication,
-//                  &ExampleApplication::start>( 5000, this, 0 );
+		timer_->set_timer<CtpTest, &CtpTest::start>(5000, this, 0);
 	}
 	// --------------------------------------------------------------------
 	void receive_radio_message(Os::Radio::node_id_t from, Os::Radio::size_t len,
 			Os::Radio::block_data_t *buf) {
-//		debug_->debug("received msg at %u from %u\n", radio_->id(), from);
+		debug_->debug("%d received msg from %u\n", radio_->id(), from);
 		debug_->debug("  message is %s\n", buf);
+		if (re_.command_RootControl_isRoot()) {
+			debug_->debug("%d Packet reached the root\n",radio_->id());
+		} else {
+			re_.send(re_.command_Routing_nextHop(),len, buf);
+		}
+
 	}
 
 	void event(uint8_t code) {
-		debug_->debug("CALLBACK: %d\n", code);
+//		debug_->debug("CALLBACK: %d\n", code);
 	}
 private:
 	Os::Radio::self_pointer_t radio_;

@@ -30,13 +30,7 @@
 
 //Uncomment to enable general debug messages
 //#define LINK_ESTIMATOR_DEBUG
-#define DEBUG_NODES				{7,6,5,4,3,2,1,8}
-#define DEBUG_NODES_NR 			8
-#define ROOT_NODES_NR 			1
-#define ROOT_NODES 				{6}
 
-#define LE_MAX_FOOTER_ENTRIES	15
-#define LE_FOOTER_ENTRY_SIZE	3
 #define LE_MAX_EVENT_RECEIVERS	2
 
 namespace wiselib {
@@ -76,8 +70,8 @@ public:
 	typedef vector_static<OsModel, radio_delegate_t, RADIO_BASE_MAX_RECEIVERS> RecvCallbackVector;
 	typedef typename RecvCallbackVector::iterator RecvCallbackVectorIterator;
 
-	typedef delegate1<void, uint8_t> notify_delegate_t;
-	typedef vector_static<OsModel, notify_delegate_t, LE_MAX_EVENT_RECEIVERS> EventCallbackVector;
+	typedef delegate3<void, uint8_t, node_id_t, block_data_t*> event_delegate_t;
+	typedef vector_static<OsModel, event_delegate_t, LE_MAX_EVENT_RECEIVERS> EventCallbackVector;
 	typedef typename EventCallbackVector::iterator EventCallbackVectorIterator;
 
 	typedef struct neighbor_stat_entry {
@@ -85,7 +79,7 @@ public:
 		uint8_t inquality;
 	} neighbor_stat_entry_t;
 
-	typedef CtpLinkEstimatorMsg<OsModel, Radio, sizeof(neighbor_stat_entry_t)> CtpLe;
+	typedef CtpLinkEstimatorMsg<OsModel, Radio, sizeof(neighbor_stat_entry_t)> LinkEstimatorMsg;
 
 	// --------------------------------------------------------------------
 
@@ -140,17 +134,15 @@ public:
 
 	enum Restrictions {
 		//TODO: Compute max message length
-		LE_HEADER_SIZE = 2, // LinkEstimator header overhead
-		MAX_MESSAGE_LENGTH = Radio_P::MAX_MESSAGE_LENGTH
-				- (LE_HEADER_SIZE + LE_MAX_FOOTER_ENTRIES * LE_FOOTER_ENTRY_SIZE), ///< Maximal number of bytes in payload minus the LE header and footer
+		MSG_HEADER_SIZE = LinkEstimatorMsg::HEADER_SIZE, // LinkEstimator header overhead
+		MAX_MESSAGE_LENGTH = Radio_P::MAX_MESSAGE_LENGTH - MSG_HEADER_SIZE, ///< Maximal number of bytes in payload minus the LE header and footer
 		RANDOM_MAX = RandomNumber::RANDOM_MAX ///< Maximum random number that can be generated
-
 	};
 
 	// --------------------------------------------------------------------
 
 	enum Events {
-		LE_EVENT_NEIGHBOUR_EVICTED = 0
+		LE_EVENT_NEIGHBOUR_EVICTED = 0, LE_EVENT_SHOULD_INSERT = 1
 	};
 
 	// --------------------------------------------------------------------
@@ -228,10 +220,8 @@ public:
 	};
 
 	// -----------------------------------------------------------------------
-
-	uint16_t link_quality;
-
 	// keep information about links from the neighbors
+
 	neighbor_table_entry_t* NeighborTable;
 	// link estimation sequence, increment every time a beacon is sent
 	uint8_t linkEstSeq;
@@ -261,8 +251,7 @@ public:
 	// -----------------------------------------------------------------------
 
 	int init(void) {
-
-		enable_radio();
+		init_variables();
 
 		return SUCCESS;
 	}
@@ -277,7 +266,7 @@ public:
 		clock_ = &clock;
 		random_number_ = &random_number;
 
-		enable_radio();
+		init_variables();
 
 		return SUCCESS;
 	}
@@ -291,7 +280,7 @@ public:
 
 		radio().enable_radio();
 
-		radio().reg_recv_callback<CtpLinkEstimator, &CtpLinkEstimator::receive>(
+		radio().template reg_recv_callback<self_type, &self_type::receive>(
 				this);
 
 		//TODO: Move init functions to init_variables function
@@ -317,25 +306,6 @@ public:
 	// -----------------------------------------------------------------------
 
 	int send(node_id_t destination, size_t len, block_data_t *data) {
-		//	RoutingTableIterator it = routing_table_.find(destination);
-		//	if (it != routing_table_.end()) {
-		//		routing_message_.set_path(it->second.path);
-		//		radio().send(it->second.path[1], routing_message_.buffer_size(),
-		//				(uint8_t*) &routing_message_);
-		//#ifdef LINK_ESTIMATOR_DEBUG
-		//		debug().debug( "Re: Existing path in Cache with size %d hops %d idx %d\n",
-		//				it->second.path.size(), it->second.hops, routing_message_.path_idx() );
-		//		print_path( it->second.path );
-		//#endif
-		//	} else {
-		//
-		//		// radio().send( Radio::BROADCAST_ADDRESS, message.buffer_size(),
-		//		// (uint8_t*) &message );
-		//#ifdef LINK_ESTIMATOR_DEBUG
-		//		debug().debug( "Re: Start Route Request from %d to %d.\n", message.source(), message.destination() );
-		//#endif
-		//	}
-
 		return command_Send_send(destination, len, data);
 	}
 
@@ -355,7 +325,9 @@ public:
 
 		return -1;
 	}
+
 	// --------------------------------------------------------------------
+
 	int unreg_recv_callback(int idx) {
 		recv_callbacks_.at(idx) = radio_delegate_t();
 		return SUCCESS;
@@ -363,24 +335,49 @@ public:
 
 	// -----------------------------------------------------------------------
 
+	template<class T, void (T::*TMethod)(uint8_t, node_id_t, block_data_t*)>
+	uint8_t reg_event_callback(T *obj_pnt) {
+
+		if (event_callbacks_.empty())
+			event_callbacks_.assign(LE_MAX_EVENT_RECEIVERS, event_delegate_t());
+
+		for (EventCallbackVectorIterator it = event_callbacks_.begin();
+				it != event_callbacks_.end(); it++) {
+			if ((*it) == event_delegate_t()) {
+				(*it) = event_delegate_t::template from_method<T, TMethod>(
+						obj_pnt);
+				return 0;
+			}
+		}
+
+		return -1;
+	}
+
+	// ----------------------------------------------------------------------------------
+
+	int unreg_event_callback(int idx) {
+		event_callbacks_.at(idx) = event_delegate_t();
+		return idx;
+	}
+
+	// ----------------------------------------------------------------------------------
+
 	/*
 	 * LinkEstimator Interface -------------------------------------------------------------
 	 */
 	// return bi-directional link quality to the neighbor
 	uint16_t command_LinkEstimator_getLinkQuality(node_id_t neighbor) {
-		//		uint8_t idx;
-		//		idx = findIdx(neighbor);
-		//		if (idx == INVALID_RVAL) {
-		//			return VERY_LARGE_EETX_VALUE;
-		//		} else {
-		//			if (NeighborTable[idx].flags & MATURE_ENTRY) {
-		//				return NeighborTable[idx].eetx;
-		//			} else {
-		//				return VERY_LARGE_EETX_VALUE;
-		//			}
-		//		}
-		//		debug().debug("%d: link quality: %d\n",radio().id(),link_quality);
-		return 1;
+		uint8_t idx;
+		idx = findIdx(neighbor);
+		if (idx == INVALID_RVAL) {
+			return VERY_LARGE_EETX_VALUE;
+		} else {
+			if (NeighborTable[idx].flags & MATURE_ENTRY) {
+				return NeighborTable[idx].eetx;
+			} else {
+				return VERY_LARGE_EETX_VALUE;
+			}
+		}
 	}
 
 	// -----------------------------------------------------------------------
@@ -389,7 +386,7 @@ public:
 	// even if eviction of a perfectly fine neighbor is called for
 	error_t command_LinkEstimator_insertNeighbor(node_id_t neighbor) {
 		uint8_t nidx;
-
+//		echo("forced insert of %d", neighbor);
 		nidx = findIdx(neighbor);
 		if (nidx != INVALID_RVAL) {
 #ifdef LINK_ESTIMATOR_DEBUG
@@ -428,6 +425,7 @@ public:
 			return ERR_UNSPEC;
 		}
 		NeighborTable[nidx].flags |= PINNED_ENTRY;
+//		echo("pinned %d", (int) neighbor);
 		return SUCCESS;
 	}
 
@@ -440,6 +438,22 @@ public:
 			return ERR_UNSPEC;
 		}
 		NeighborTable[nidx].flags &= ~PINNED_ENTRY;
+//		echo("unpinned %d", (int) neighbor);
+		return SUCCESS;
+	}
+
+	// -----------------------------------------------------------------------
+
+	// called by the RE as a feedback to the signal_CompareBit_shouldInsert event
+	error_t command_LinkEstimator_forceInsertNeighbor(node_id_t neighbor) {
+		uint8_t nidx;
+
+		nidx = findRandomNeighborIdx();
+		if (nidx == INVALID_RVAL) {
+			return ERR_UNSPEC;
+		}
+		signal_LinkEstimator_evicted(NeighborTable[nidx].ll_addr);
+		initNeighborIdx(nidx, neighbor);
 		return SUCCESS;
 	}
 
@@ -464,50 +478,22 @@ public:
 	// slap the header and footer before sending the message
 	error_t command_Send_send(node_id_t addr, size_t size, block_data_t* pkt) {
 
-		CtpLe lePkt; // initialize the LinkEstimator packet
-		//lePkt->setKind(NETWORK_LAYER_PACKET);
-		//lePkt->getNetMacInfoExchange().lastHop = self ; // standard routing packet fields
+		LinkEstimatorMsg lePkt; // initialize the LinkEstimator packet
 
-		if (lePkt.set_data(pkt, size) != SUCCESS) {
+		// add the header and dynamically adds the size of the footer. Note that actually there is no footer but just a bigger header.
+		if (addLinkEstHeaderAndFooter(&lePkt, size) != SUCCESS) {
+			echo("Could not add header to LE message");
+			return ERR_UNSPEC;
+		}
+
+		if (lePkt.set_payload(pkt, size) != SUCCESS) {
 			echo("Could not add data to LE message.");
 			return ERR_UNSPEC;
 		}
-		uint8_t ovhd = addLinkEstHeaderAndFooter(&lePkt, size); // add the header and dynamically adds the size of the footer. Note that actually there is no footer but just a bigger header.
-		//lePkt->setByteLength(ovhd) ;
 
-		//	print_packet(msg, newlen);
-
-		//TODO: Send message - use dualbuffer??
-		return radio().send(addr, lePkt.buffer_size(), (block_data_t*) &lePkt);
-		//return db->command_Send_send(addr,lePkt) ; // the message is sent via DualBuffer. We don't need to keep a copy locally.
-	}
-
-	// ----------------------------------------------------------------------------------
-
-	template<class T, void (T::*TMethod)(uint8_t)>
-	uint8_t reg_event_callback(T *obj_pnt) {
-
-		if (event_callbacks_.empty())
-			event_callbacks_.assign(LE_MAX_EVENT_RECEIVERS,
-					notify_delegate_t());
-
-		for (EventCallbackVectorIterator it = event_callbacks_.begin();
-				it != event_callbacks_.end(); it++) {
-			if ((*it) == notify_delegate_t()) {
-				(*it) = notify_delegate_t::template from_method<T, TMethod>(
-						obj_pnt);
-				return 0;
-			}
-		}
-
-		return -1;
-	}
-
-	// ----------------------------------------------------------------------------------
-
-	int unreg_event_callback(int idx) {
-		event_callbacks_.at(idx) = notify_delegate_t();
-		return idx;
+		return radio().send(addr,
+				lePkt.HEADER_SIZE + lePkt.ne() * sizeof(neighbor_stat_entry)
+						+ size, (block_data_t*) &lePkt);
 	}
 
 	// ----------------------------------------------------------------------------------
@@ -521,7 +507,6 @@ private:
 	typename RandomNumber::self_pointer_t random_number_;
 
 	static const unsigned debug_nodes_[DEBUG_NODES_NR];
-	static const unsigned root_nodes_[ROOT_NODES_NR];
 
 	RecvCallbackVector recv_callbacks_;
 	EventCallbackVector event_callbacks_;
@@ -548,6 +533,25 @@ private:
 		return *random_number_;
 	}
 
+	// -----------------------------------------------------------------------
+
+	void init_variables() {
+
+		//Id of the node (like TOS_NODE_ID)
+		self = radio().id();
+
+		NEIGHBOR_TABLE_SIZE = 10;
+
+		//TODO: Replace neighbor table
+		NeighborTable = new neighbor_table_entry_t[NEIGHBOR_TABLE_SIZE];
+		linkEstSeq = 0;
+		prevSentIdx = 0;
+
+		initNeighborTable();
+	}
+
+	// ----------------------------------------------------------------------------------
+
 	void echo(const char *msg, ...) {
 		va_list fmtargs;
 		char buffer[1024];
@@ -557,7 +561,7 @@ private:
 				va_start(fmtargs, msg);
 				vsnprintf(buffer, sizeof(buffer) - 1, msg, fmtargs);
 				va_end(fmtargs);
-				debug().debug("%d: RE: ", id());
+				debug().debug("%d: LE: ", id());
 				debug().debug(buffer);
 				debug().debug("\n");
 				break;
@@ -574,61 +578,15 @@ private:
 	// -----------------------------------------------------------------------
 
 	void receive(node_id_t from, size_t len, block_data_t *data) {
-		notify_receivers(from, len, data);
-		processReceivedMessage(from, len, (CtpLe*)data);
-		//TODO: callback to RE to signal msg received
-		//cre->event_BeaconReceive_receive(msg->decapsulate()) ;
-
-	}
-
-	// -----------------------------------------------------------------------
-
-	void init_variables() {
-
-		//Id of the node (like TOS_NODE_ID)
-		self = radio().id();
-
-		switch (self) {
-		case 0:
-			link_quality = 2;
-			break;
-		case 1:
-			link_quality = 3;
-			break;
-		case 2:
-			link_quality = 4;
-			break;
-		case 3:
-			link_quality = 3;
-			break;
-		case 4:
-			link_quality = 2;
-			break;
-		case 5:
-			link_quality = 1;
-			break;
-		case 6:
-			link_quality = 0;
-			break;
-		case 7:
-			link_quality = 1;
-			break;
-		default:
-			link_quality = 100;
-			break;
+		if (from == radio().id()) {
+			return;
 		}
 
-		NEIGHBOR_TABLE_SIZE = 10;
+		LinkEstimatorMsg* msg = reinterpret_cast<LinkEstimatorMsg*>(data);
+		processReceivedMessage(from, len, msg);
+		notify_receivers(from, len, msg->payload());
 
-		//TODO: Replace neghbor table
-		NeighborTable = new neighbor_table_entry_t[NEIGHBOR_TABLE_SIZE];
-		linkEstSeq = 0;
-		prevSentIdx = 0;
-
-		initNeighborTable();
 	}
-
-	// ----------------------------------------------------------------------------------
 
 	// --------------------------------------------------------------------
 	void notify_receivers(node_id_t from, size_t len, block_data_t *data) {
@@ -641,12 +599,11 @@ private:
 
 	// ----------------------------------------------------------------------------------
 
-	void notify_listeners(uint8_t event) {
+	void notify_listeners(uint8_t event, node_id_t node, block_data_t *data) {
 		for (EventCallbackVectorIterator it = event_callbacks_.begin();
 				it != event_callbacks_.end(); ++it) {
-			if (*it != notify_delegate_t()) {
-				(*it)(event);
-				echo("notified: %d\n", it);
+			if (*it != event_delegate_t()) {
+				(*it)(event, node, data);
 			}
 
 		}
@@ -657,9 +614,9 @@ private:
 	// called when link estimator generator packet or
 	// packets from upper layer that are wired to pass through
 	// link estimator is received
-	void processReceivedMessage(node_id_t ll_addr, size_t len, CtpLe *msg) {
+	void processReceivedMessage(node_id_t ll_addr, size_t len,
+			LinkEstimatorMsg *msg) {
 		uint8_t nidx;
-		uint8_t num_entries;
 
 #ifdef LINK_ESTIMATOR_DEBUG
 		echo("Receiving packet.");
@@ -674,15 +631,11 @@ private:
 		 all messages indifferent whether they are data or routing beacons*/
 
 		//if (command_SubAMPacket_destination(msg) == BROADCAST_ADDRESS) {
-		node_id_t from;
-
 #ifdef LINK_ESTIMATOR_DEBUG
 		echo("Got seq: %d from link: %d",(int)msg->seqno(),(int)ll_addr);
 #endif
 
-		num_entries = msg->ne() & NUM_ENTRIES_FLAG;
-
-		print_neighbor_table();
+//		print_neighbor_table();
 
 		// update neighbor table with this information
 		// find the neighbor
@@ -698,14 +651,17 @@ private:
 		//       evict the neighbor and init the entry
 		//     else
 		//       we can not accommodate this neighbor in the table
+
 		nidx = findIdx(ll_addr);
 
 		if (nidx != INVALID_RVAL) {
 #ifdef LINK_ESTIMATOR_DEBUG
 			echo("Found the entry so updating");
 #endif
+//			echo("neighbour %d  found.  updating", ll_addr);
 			updateNeighborEntryIdx(nidx, msg->seqno());
 		} else {
+//			echo("neighbour %d not found", ll_addr);
 			nidx = findEmptyNeighborIdx();
 			if (nidx != INVALID_RVAL) {
 
@@ -713,17 +669,24 @@ private:
 				echo("Found an empty entry");
 #endif
 				initNeighborIdx(nidx, ll_addr);
+//				echo("empty entry. insert %d", ll_addr);
 				updateNeighborEntryIdx(nidx, msg->seqno());
 			} else {
+				print_neighbor_table();
+//				echo("no empty entry found");
 				nidx = findWorstNeighborIdx(EVICT_EETX_THRESHOLD);
 				if (nidx != INVALID_RVAL) {
 
 #ifdef LINK_ESTIMATOR_DEBUG
 					echo("Evicted neighbor %d  at idx %d",(int)NeighborTable[nidx].ll_addr,(int)nidx);
 #endif
+//					echo("no worst entry found for %d. signaling to the RE",
+//							ll_addr);
 					signal_LinkEstimator_evicted(NeighborTable[nidx].ll_addr);
 					initNeighborIdx(nidx, ll_addr);
 				} else {
+//					echo("worst entry found for %d. should insert to RE",
+//							ll_addr);
 
 #ifdef LINK_ESTIMATOR_DEBUG
 					echo("No room in the table");
@@ -732,30 +695,25 @@ private:
 					//This is a bit more complicated - needs feedback from the RE to see if the neighbour must be inserted or not
 					//Maybe the neighbour can be stored somewhere and it can be inserted later, at the direct call by the RE when it receives the callback
 
-					/*cPacket* dupMsg = msg->dup() ;
-
-					 if (signal_CompareBit_shouldInsert(dupMsg->decapsulate(),command_LinkPacketMetadata_highChannelQuality(msg))) {
-					 nidx = findRandomNeighborIdx();
-					 if (nidx != INVALID_RVAL) {
-					 signal_LinkEstimator_evicted(NeighborTable[nidx].ll_addr) ;
-					 initNeighborIdx(nidx, ll_addr);
-					 }
-					 }
-					 delete dupMsg ;*/
+					signal_CompareBit_shouldInsert(ll_addr, msg->payload());
 				}
 			}
 		}
-		//}
 	}
 
 	// ----------------------------------------------------------------------------------
 
+	/*
+	 * Signals to the RE
+	 */
+
 	//TODO: signal RE that a neighbour was evicted
 	void signal_LinkEstimator_evicted(node_id_t n) {
+		notify_listeners(LE_EVENT_NEIGHBOUR_EVICTED, n, NULL);
+	}
 
-		notify_listeners(LE_EVENT_NEIGHBOUR_EVICTED);
-
-		//cre->event_LinkEstimator_evicted(n) ;
+	void signal_CompareBit_shouldInsert(node_id_t ll_addr, block_data_t* msg) {
+		notify_listeners(LE_EVENT_SHOULD_INSERT, ll_addr, msg);
 	}
 
 	// ----------------------------------------------------------------------------------
@@ -763,53 +721,17 @@ private:
 	// add the link estimation header (seq no) and link estimation
 	// footer (neighbor entries) in the packet. Call just before sending
 	// the packet.
-	uint8_t addLinkEstHeaderAndFooter(CtpLe *msg, uint8_t len) {
+	error_t addLinkEstHeaderAndFooter(LinkEstimatorMsg *msg, uint8_t len) {
 
 		// header and footer operations are skipped, we use cPacket methods instead.
 
-		uint8_t i, j, k;
-		uint8_t maxEntries, newPrevSentIdx;
+		uint8_t j=0, k;
+		uint8_t maxEntries, newPrevSentIdx=0;
 
-		maxEntries = ((MAX_MESSAGE_LENGTH - len - LE_HEADER_SIZE)
+		maxEntries = ((MAX_MESSAGE_LENGTH - MSG_HEADER_SIZE - len)
 				/ sizeof(neighbor_stat_entry_t));
 
-		// Depending on the number of bits used to store the number
-		// of entries, we can encode up to NUM_ENTRIES_FLAG using those bits
-		if (maxEntries > NUM_ENTRIES_FLAG) {
-			maxEntries = NUM_ENTRIES_FLAG;
-		}
-
-		j = 0;
-		newPrevSentIdx = 0;
-
-		// In CtpNoePacket.msg we have defined a footer as an array of neighbor_stat_entry.
-		// Before storing any valu, we need to determine the size of the array.
-		// To this aim the first for loop just counts the number of entries that will be
-		// stored in the footer while the second loop actually stores them.
-		for (i = 0; i < NEIGHBOR_TABLE_SIZE && j < maxEntries; i++) {
-			uint8_t neighborCount;
-
-			if (maxEntries <= NEIGHBOR_TABLE_SIZE)
-				neighborCount = maxEntries;
-			else
-				neighborCount = NEIGHBOR_TABLE_SIZE;
-
-			k = (prevSentIdx + i + 1) % NEIGHBOR_TABLE_SIZE;
-			if ((NeighborTable[k].flags & VALID_ENTRY)
-					&& (NeighborTable[k].flags & MATURE_ENTRY)) {
-				j++;
-			}
-		}
-
-		msg->set_ne(j);
-		j = 0;
-
-		for (i = 0; i < NEIGHBOR_TABLE_SIZE && j < maxEntries; i++) {
-			uint8_t neighborCount;
-			if (maxEntries <= NEIGHBOR_TABLE_SIZE)
-				neighborCount = maxEntries;
-			else
-				neighborCount = NEIGHBOR_TABLE_SIZE;
+		for (int i = 0; i < NEIGHBOR_TABLE_SIZE && j < maxEntries; i++) {
 
 			k = (prevSentIdx + i + 1) % NEIGHBOR_TABLE_SIZE;
 			if ((NeighborTable[k].flags & VALID_ENTRY)
@@ -818,12 +740,11 @@ private:
 				neighbor_stat_entry_t temp;
 				temp.ll_addr = NeighborTable[k].ll_addr;
 				temp.inquality = NeighborTable[k].inquality;
-				//msg->setLinkest_footer(j,temp) ;
 
-				if (msg->add_neighbour_entry((block_data_t*) &temp)
+				if (msg->add_neighbour_entry(j, (block_data_t*) &temp)
 						!= SUCCESS) {
 					echo("Could not add neighbour entry to LE message footer.");
-					return 0;
+					return ERR_UNSPEC;
 				}
 
 				newPrevSentIdx = k;
@@ -834,8 +755,8 @@ private:
 		prevSentIdx = newPrevSentIdx;
 
 		msg->set_seqno(linkEstSeq++);
-		msg->set_ne(0 | (NUM_ENTRIES_FLAG & j));
-		return LE_HEADER_SIZE + j * sizeof(neighbor_stat_entry_t);
+		msg->set_ne(j);
+		return SUCCESS;
 	}
 
 	// initialize the given entry in the table for neighbor ll_addr
@@ -958,7 +879,9 @@ private:
 	// called when new beacon estimate is done
 	// also called when new DEETX estimate is done
 	void updateEETX(neighbor_table_entry_t *ne, uint16_t newEst) {
+		//TODO: Use actual ETX instead of constant one
 		ne->eetx = (ALPHA * ne->eetx + (10 - ALPHA) * newEst)/10;
+//		ne->eetx = 1;
 	}
 
 	// ----------------------------------------------------------------------------------
@@ -971,11 +894,11 @@ private:
 	uint8_t computeEETX(uint8_t q1) {
 		uint16_t q;
 		if (q1 > 0) {
-			q =  2550 / q1 - 10;
+			q = 2550 / q1 - 10;
 			if (q > 255) {
 				q = VERY_LARGE_EETX_VALUE;
 			}
-			return (uint8_t)q;
+			return (uint8_t) q;
 		} else {
 			return VERY_LARGE_EETX_VALUE;
 		}
@@ -1064,14 +987,18 @@ private:
 
 	// print the neighbor table. for debugging.
 	void print_neighbor_table() {
-		//uint8_t i;
-		//neighbor_table_entry_t *ne;
-		//for (i = 0; i < NEIGHBOR_TABLE_SIZE; i++) {
-		//	ne = &NeighborTable[i];
-		//	if (ne->flags & VALID_ENTRY) {
-		//		trace()<<(int)i<<":"<<(int)ne->ll_addr<<" inQ="<<(int)ne->inquality<<", inA="<<(int)ne->inage<<", rcv="<<(int)ne->rcvcnt<<", fail="<<(int)ne->failcnt<<", Q="<<(int)computeEETX(ne->inquality)  ;
-		//	}
-		//}
+		uint8_t i;
+		neighbor_table_entry_t *ne;
+		for (i = 0; i < NEIGHBOR_TABLE_SIZE; i++) {
+			ne = &NeighborTable[i];
+			if (ne->flags & VALID_ENTRY) {
+				echo(
+						"%d:%d inQ=%d, inquality=%d, inA=%d, inage=%d, rcv=%d, fail=%d, failcnt=%d, Q=%d",
+						(int) i, (int) ne->ll_addr, (int) ne->inquality,
+						(int) ne->inage, (int) ne->rcvcnt, (int) ne->failcnt,
+						(int) computeEETX(ne->inquality));
+			}
+		}
 	}
 
 	// ----------------------------------------------------------------------------------
@@ -1085,14 +1012,10 @@ private:
 		}
 	}
 
-};
+}
+;
 
 // ----------------------------------------------------------------------------------
-
-template<typename OsModel_P, typename RoutingTable_P, typename RandomNumber_P,
-		typename Radio_P, typename Timer_P, typename Debug_P, typename Clock_P> const unsigned CtpLinkEstimator<
-		OsModel_P, RoutingTable_P, RandomNumber_P, Radio_P, Timer_P, Debug_P,
-		Clock_P>::root_nodes_[] = ROOT_NODES;
 
 template<typename OsModel_P, typename RoutingTable_P, typename RandomNumber_P,
 		typename Radio_P, typename Timer_P, typename Debug_P, typename Clock_P> const unsigned CtpLinkEstimator<

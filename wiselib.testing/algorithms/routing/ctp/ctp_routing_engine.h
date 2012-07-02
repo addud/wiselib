@@ -30,12 +30,7 @@
 
 //Uncomment to enable general debug messages
 //#define ROUTING_ENGINE_DEBUG
-#define DEBUG_NODES				{7,6,5,4,3,2,1,8}
-#define DEBUG_NODES_NR 			8
-#define ROOT_NODES_NR 			1
-#define ROOT_NODES 				{6}
 
-#define RE_MAX_MESSAGE_OVERHEAD	5
 #define RE_MAX_EVENT_RECEIVERS  2
 
 namespace wiselib {
@@ -71,14 +66,14 @@ public:
 	typedef typename Clock::time_t time_t;
 	typedef typename RandomNumber::value_t value_t;
 
-	typedef CtpRoutingEngineMsg<OsModel, Radio, RE_MAX_MESSAGE_OVERHEAD> RoutingMessage;
+	typedef CtpRoutingEngineMsg<OsModel, Radio> RoutingMessage;
 
 	typedef delegate3<void, node_id_t, size_t, block_data_t*> radio_delegate_t;
 	typedef vector_static<OsModel, radio_delegate_t, RADIO_BASE_MAX_RECEIVERS> RecvCallbackVector;
 	typedef typename RecvCallbackVector::iterator RecvCallbackVectorIterator;
 
-	typedef delegate1<void, uint8_t> notify_delegate_t;
-	typedef vector_static<OsModel, notify_delegate_t, RE_MAX_EVENT_RECEIVERS> EventCallbackVector;
+	typedef delegate1<void, uint8_t> event_delegate_t;
+	typedef vector_static<OsModel, event_delegate_t, RE_MAX_EVENT_RECEIVERS> EventCallbackVector;
 	typedef typename EventCallbackVector::iterator EventCallbackVectorIterator;
 
 	// --------------------------------------------------------------------
@@ -100,9 +95,7 @@ public:
 	// --------------------------------------------------------------------
 
 	enum Restrictions {
-		//TODO: Compute max message length
-		MAX_MESSAGE_LENGTH = Radio_P::MAX_MESSAGE_LENGTH
-				- RE_MAX_MESSAGE_OVERHEAD, ///< Maximal number of bytes in payload
+		MAX_MESSAGE_LENGTH = Radio_P::MAX_MESSAGE_LENGTH - sizeof(node_id_t), ///< Maximum message length for the radio - one address space
 		RANDOM_MAX = RandomNumber::RANDOM_MAX ///< Maximum random number that can be generated
 	};
 
@@ -139,7 +132,6 @@ public:
 	int init(void) {
 
 		init_variables();
-		enable_radio();
 
 		return SUCCESS;
 	}
@@ -155,7 +147,6 @@ public:
 		random_number_ = &random_number;
 
 		init_variables();
-		enable_radio();
 
 		return SUCCESS;
 	}
@@ -178,8 +169,6 @@ public:
 
 		radio().enable_radio();
 
-		radio().reg_recv_callback<CtpRoutingEngine, &CtpRoutingEngine::receive>(
-				this);
 		routeInfoInit(&routeInfo);
 
 		// Call the corresponding rootcontrol command
@@ -191,6 +180,9 @@ public:
 		command_StdControl_start();
 
 		radio().template reg_recv_callback<self_type, &self_type::receive>(
+				this);
+
+		radio().template reg_event_callback<self_type, &self_type::rcv_event>(
 				this);
 
 		timer().template set_timer<self_type, &self_type::timer_elapsed>(15000,
@@ -224,26 +216,15 @@ public:
 	 */
 	int send(node_id_t destination, size_t len, block_data_t *data) {
 
-		//	RoutingTableIterator it = routing_table_.find(destination);
-		//	if (it != routing_table_.end()) {
-		//		routing_message_.set_path(it->second.path);
-		//		radio().send(it->second.path[1], routing_message_.buffer_size(),
-		//				(uint8_t*) &routing_message_);
-		//#ifdef ROUTING_ENGINE_DEBUG
-		//		debug().debug("%d: ",self); debug().debug( "Re: Existing path in Cache with size %d hops %d idx %d\n",
-		//				it->second.path.size(), it->second.hops, routing_message_.path_idx() );
-		//		print_path( it->second.path );
-		//#endif
-		//	} else {
-		//
-		//		// radio().send( Radio::BROADCAST_ADDRESS, message.buffer_size(),
-		//		// (uint8_t*) &message );
-		//#ifdef ROUTING_ENGINE_DEBUG
-		//		debug().debug("%d: ",self); debug().debug( "Re: Start Route Request from %d to %d.\n", message.source(), message.destination() );
-		//#endif
-		//	}
-		echo("sent: %s", data);
-		return SUCCESS;
+		/*
+		 * Insert the destination address at the beginning of the message
+		 * This helps differentiating between received routing beacons and data messages
+		 */
+		block_data_t buffer[len + sizeof(node_id_t)];
+		write<OsModel, block_data_t, node_id_t>(buffer, destination);
+		memcpy(buffer + sizeof(node_id_t), data, len);
+		len+=sizeof(node_id_t);
+		return radio().send(destination, len , buffer);
 	}
 
 	template<class T, void (T::*TMethod)(node_id_t, size_t, block_data_t*)>
@@ -268,7 +249,32 @@ public:
 		return SUCCESS;
 	}
 
-	// --------------------------------------------------------------------
+	// ----------------------------------------------------------------------------------
+
+	template<class T, void (T::*TMethod)(uint8_t)>
+	uint8_t reg_event_callback(T *obj_pnt) {
+
+		if (event_callbacks_.empty())
+			event_callbacks_.assign(RE_MAX_EVENT_RECEIVERS, event_delegate_t());
+
+		for (EventCallbackVectorIterator it = event_callbacks_.begin();
+				it != event_callbacks_.end(); it++) {
+			if ((*it) == event_delegate_t()) {
+				(*it) = event_delegate_t::template from_method<T, TMethod>(
+						obj_pnt);
+				return 0;
+			}
+		}
+
+		return -1;
+	}
+
+	// ----------------------------------------------------------------------------------
+
+	int unreg_event_callback(int idx) {
+		event_callbacks_.at(idx) = event_delegate_t();
+		return idx;
+	}
 
 	/*
 	 * UnicastNameFreeRouting Inteface -----------------------------------------
@@ -393,34 +399,6 @@ public:
 		return state_is_root;
 	}
 
-	// ----------------------------------------------------------------------------------
-
-	template<class T, void (T::*TMethod)(uint8_t)>
-	uint8_t reg_event_callback(T *obj_pnt) {
-
-		if (event_callbacks_.empty())
-			event_callbacks_.assign(RE_MAX_EVENT_RECEIVERS,
-					notify_delegate_t());
-
-		for (EventCallbackVectorIterator it = event_callbacks_.begin();
-				it != event_callbacks_.end(); it++) {
-			if ((*it) == notify_delegate_t()) {
-				(*it) = notify_delegate_t::template from_method<T, TMethod>(
-						obj_pnt);
-				return 0;
-			}
-		}
-
-		return -1;
-	}
-
-	// ----------------------------------------------------------------------------------
-
-	int unreg_event_callback(int idx) {
-		event_callbacks_.at(idx) = notify_delegate_t();
-		return idx;
-	}
-
 private:
 
 	typename Radio::self_pointer_t radio_;
@@ -540,9 +518,8 @@ private:
 	void notify_listeners(uint8_t event) {
 		for (EventCallbackVectorIterator it = event_callbacks_.begin();
 				it != event_callbacks_.end(); ++it) {
-			if (*it != notify_delegate_t()) {
+			if (*it != event_delegate_t()) {
 				(*it)(event);
-				echo("notified: %d\n", it);
 			}
 
 		}
@@ -713,8 +690,8 @@ private:
 				(int) (quality + 10));
 #endif
 		//TODO: Removed this while using the number of hops metric
-		//return (quality + 10);
-		return quality;
+		return (quality + 10);
+//		return quality;
 	}
 
 	// ----------------------------------------------------------------------------------
@@ -868,15 +845,40 @@ private:
 	// ----------------------------------------------------------------------------------
 
 	void receive(node_id_t from, size_t len, block_data_t *data) {
-		notify_receivers(from, len, data);
+		if (from == radio().id()) {
+			return;
+		}
+		//Read and remove the destination from the beginning of the message
+		node_id_t destination = read<OsModel, block_data_t, node_id_t>(data);
+		data += sizeof(node_id_t);
+		len-=sizeof(node_id_t);
 
-		RoutingMessage *message = reinterpret_cast<RoutingMessage*>(data);
-		event_BeaconReceive_receive(from, message);
-
-		//TODO: implement logic for forwarding messages destinated to the FE
+		if (destination != BROADCAST_ADDRESS) {
+			//Data message => forward to the FE
+			notify_receivers(from, len, data);
+		} else {
+			//Routing beacon => process inside the RE
+			RoutingMessage *message = reinterpret_cast<RoutingMessage*>(data);
+			event_BeaconReceive_receive(from, message);
+		}
 	}
 
-	// ----------------------------------------------------------------------------------
+	void rcv_event(uint8_t event, node_id_t neighbor, block_data_t* msg) {
+		switch (event) {
+		case (Radio_P::LE_EVENT_NEIGHBOUR_EVICTED):
+			event_LinkEstimator_evicted(neighbor);
+			break;
+		case (Radio::LE_EVENT_SHOULD_INSERT):
+			if (event_CompareBit_shouldInsert(msg)) {
+				radio().command_LinkEstimator_forceInsertNeighbor(neighbor);
+			}
+			break;
+		default:
+			break;
+		}
+	}
+
+// ----------------------------------------------------------------------------------
 
 	inline void routeInfoInit(RoutingTableValue *ri) {
 		ri->parent = INVALID_ADDR;
@@ -885,10 +887,10 @@ private:
 		ri->congested = false;
 	}
 
-	// ----------------------------------------------------------------------------------
+// ----------------------------------------------------------------------------------
 
 	/* send a beacon advertising this node's routeInfo */
-	// only posted if running and radioOn
+// only posted if running and radioOn
 	void sendBeaconTask() {
 		error_t eval;
 
@@ -906,7 +908,6 @@ private:
 			beaconMsg.set_etx(routeInfo.etx);
 			beaconMsg.set_pull();
 		} else {
-			//TODO Call get link quality from LE
 			beaconMsg.set_etx(
 					routeInfo.etx
 							+ evaluateEtx(
@@ -920,9 +921,8 @@ private:
 				(int) beaconMsg.parent(), (int) beaconMsg.etx());
 #endif
 
-		//TODO: Call LE send command
-		eval = radio().command_Send_send(BROADCAST_ADDRESS,
-				beaconMsg.buffer_size(), (block_data_t*) &beaconMsg); // the duplicate will be deleted in the LE module, we keep a copy here that is reused each time.
+		eval = send(BROADCAST_ADDRESS, beaconMsg.buffer_size(),
+				(block_data_t*) &beaconMsg); // the duplicate will be deleted in the LE module, we keep a copy here that is reused each time.
 
 		if (eval == SUCCESS) {
 //				echo("beacon sent - parent: %d etx: %d", (int) beaconMsg.parent(),
@@ -937,7 +937,7 @@ private:
 		}
 	}
 
-	// ----------------------------------------------------------------------------------
+// ----------------------------------------------------------------------------------
 
 	void event_RouteTimer_fired() {
 		if (radioOn && running) {
@@ -945,7 +945,7 @@ private:
 		}
 	}
 
-	// ----------------------------------------------------------------------------------
+// ----------------------------------------------------------------------------------
 
 	void event_BeaconTimer_fired() {
 		if (radioOn && running) {
@@ -963,7 +963,7 @@ private:
 		}
 	}
 
-	// ----------------------------------------------------------------------------------
+// ----------------------------------------------------------------------------------
 
 	/* Handle the receiving of beacon messages from the neighbors. We update the
 	 * table, but wait for the next route update to choose a new parent */
@@ -987,26 +987,26 @@ private:
 
 		//update neighbor table
 		if (rcvBeacon->parent() != INVALID_ADDR) {
-
 			/* If this node is a root, request a forced insert in the link
 			 * estimator table and pin the node. */
-
-			//			debug().debug("%d: ", self);
-			//			debug().debug(
-			//					"BeaconReceive.receive - from %d [parent: %d etx: %d] \n",
-			//					(int) from, (int) (rcvBeacon->parent()),
-			//					(int) (rcvBeacon->etx()));
+#ifdef ROUTING_ENGINE_DEBUG
+			echo("BeaconReceive.receive - from %d [parent: %d etx: %d]",
+					(int) from, (int) (rcvBeacon->parent()),
+					(int) (rcvBeacon->etx()));
+#endif
+//			echo("received etx: %d from %d", rcvBeacon->etx(), from);
 			if (rcvBeacon->etx() == 0) {
+
 #ifdef ROUTING_ENGINE_DEBUG
 				debug().debug("%d: ", self);
 				debug().debug("from a root, inserting if not in table");
 #endif
-
 				radio().command_LinkEstimator_insertNeighbor(from);
+//				echo("Pinned %d", from);
 				radio().command_LinkEstimator_pinNeighbor(from);
 
 			}
-			//TODO: also, if better than my current parent's path etx, insert
+//TODO: also, if better than my current parent's path etx, insert
 			routingTableUpdateEntry(from, rcvBeacon->parent(),
 					rcvBeacon->etx());
 
@@ -1020,7 +1020,81 @@ private:
 		// we do not return routing messages
 	}
 
-	// ----------------------------------------------------------------------------------
+// ----------------------------------------------------------------------------------
+
+	/* Signals that a neighbor is no longer reachable. need special care if
+	 * that neighbor is our parent */
+	void event_LinkEstimator_evicted(node_id_t neighbor) {
+		routingTableEvict(neighbor);
+		if (routeInfo.parent == neighbor) {
+			routeInfoInit(&routeInfo);
+			justEvicted = true;
+			post_updateRouteTask();
+		}
+	}
+
+// -----------------------------------------------------------------------------------
+
+// default events Routing.noRoute and Routing.routeFound skipped -> useless
+
+	/* This should see if the node should be inserted in the table.
+	 * If the white_bit is set, this means the LE believes this is a good
+	 * first hop link.
+	 * The link will be recommended for insertion if it is better* than some
+	 * link in the routing table that is not our parent.
+	 * We are comparing the path quality up to the node, and ignoring the link
+	 * quality from us to the node. This is because:
+	 *   1. because of the white bit, we assume that the 1-hop to the candidate
+	 *      link is good (say, etx=1)
+	 *   2. we are being optimistic to the nodes in the table, by ignoring the
+	 *      1-hop quality to them (which means we are assuming it's 1 as well)
+	 *      This actually sets the bar a little higher for replacement
+	 *   3. this is faster
+	 *   4. it doesn't require the link estimator to have stabilized on a link
+	 */
+	bool event_CompareBit_shouldInsert(block_data_t *msg) {
+		bool found = false;
+		uint16_t pathEtx;
+		uint16_t neighEtx;
+		RoutingTableIterator it;
+		RoutingTableValue entry;
+		RoutingMessage* rcvBeacon;
+
+		/* 1.determine this packet's path quality */
+		rcvBeacon = (RoutingMessage*) msg;
+
+		// checks if it is a RoutingMessage
+		if (rcvBeacon == NULL) {
+			//TODO: Should forward to the FE??
+			debug().debug("%d: CompareBit not Routing message\n", self);
+			return false;
+		}
+
+		if (rcvBeacon->parent() == INVALID_ADDR) {
+			return false;
+		}
+
+		/* the node is a root, recommend insertion! */
+		if (rcvBeacon->etx() == 0) {
+			return true;
+		}
+
+		pathEtx = rcvBeacon->etx();
+
+		/* 2. see if we find some neighbor that is worse */
+		for (it = routingTable.begin(); it != routingTable.end() && !found;
+				it++) {
+			entry = it->second;
+
+			//ignore parent, since we can't replace it
+			if (it->first == routeInfo.parent)
+				continue;
+			neighEtx = entry.etx;
+			//neighEtx = evaluateEtx(radio().LinkEstimator.getLinkQuality(entry->neighbor));
+			found |= (pathEtx < neighEtx);
+		}
+		return found;
+	}
 
 	/************************************************************/
 	/* Routing Table Functions                                  */
@@ -1043,17 +1117,17 @@ private:
 		it = routingTable.find(from);
 		if ((it == routingTable.end())
 				&& (routingTable.size() == routingTable.max_size())) {
-			//not found and table is full
-			//if (passLinkEtxThreshold(linkEtx))
-			//TODO: add replacement here, replace the worst
-			//}
+//not found and table is full
+//if (passLinkEtxThreshold(linkEtx))
+//TODO: add replacement here, replace the worst
+//}
 #ifdef ROUTING_ENGINE_DEBUG
 			debug().debug("%d: ", self);
 			debug().debug("routingTableUpdateEntry - FAIL, table full\n");
 #endif
 			return ERR_BUSY;
 		} else if (it == routingTable.end()) {
-			//not found and there is space
+//not found and there is space
 			if (passLinkEtxThreshold(linkEtx)) {
 				RoutingTableValue entry = it->second;
 				entry.parent = parent;
@@ -1075,7 +1149,7 @@ private:
 #endif
 			}
 		} else {
-			//found, just update
+//found, just update
 			it->first = from;
 			it->second.parent = parent;
 			it->second.etx = etx;
@@ -1089,9 +1163,24 @@ private:
 		return SUCCESS;
 	}
 
-	// ----------------------------------------------------------------------------------
+// ----------------------------------------------------------------------------------
 
-	// These functions trigger an event in the module where they should signal it.
+	error_t routingTableEvict(node_id_t neighbor) {
+		RoutingTableIterator it;
+		it = routingTable.find(neighbor);
+
+		if (it == routingTable.end()) {
+			return ERR_UNSPEC;
+		}
+
+		routingTable.erase(it);
+		return SUCCESS;
+	}
+
+	/*********** end routing table functions ***************/
+
+// ----------------------------------------------------------------------------------
+// These functions trigger an event in the module where they should signal it.
 	void signal_Routing_routeFound() {
 		//TODO: signal route found to FE
 		//cfe->event_UnicastNameFreeRouting_routeFound() ;
@@ -1103,9 +1192,9 @@ private:
 		notify_listeners(RE_EVENT_ROUTE_NOT_FOUND);
 	}
 
-	// ----------------------------------------------------------------------------------
+// ----------------------------------------------------------------------------------
 
-	// these functions simulate the post command of TinyOs
+// these functions simulate the post command of TinyOs
 	void post_updateRouteTask() {
 		setTimer((void*) POST_UPDATEROUTETASK, 0); // cannot call the updateRouteTask directly. By this way it is more similar to the post command in TinyOs.
 	}
@@ -1114,9 +1203,16 @@ private:
 		setTimer((void*) POST_SENDBEACONTASK, 0);
 	}
 
-	// ----------------------------------------------------------------------------------
+// ----------------------------------------------------------------------------------
 }
 ;
+
+// ----------------------------------------------------------------------------------
+
+template<typename OsModel_P, typename RoutingTable_P, typename RandomNumber_P,
+		typename Radio_P, typename Timer_P, typename Debug_P, typename Clock_P> const unsigned CtpRoutingEngine<
+		OsModel_P, RoutingTable_P, RandomNumber_P, Radio_P, Timer_P, Debug_P,
+		Clock_P>::root_nodes_[] = ROOT_NODES;
 
 // ----------------------------------------------------------------------------------
 
@@ -1132,13 +1228,6 @@ template<typename OsModel_P, typename RoutingTable_P, typename RandomNumber_P,
 		typename Radio_P, typename Timer_P, typename Debug_P, typename Clock_P> const unsigned CtpRoutingEngine<
 		OsModel_P, RoutingTable_P, RandomNumber_P, Radio_P, Timer_P, Debug_P,
 		Clock_P>::debug_nodes_[] = DEBUG_NODES;
-
-// ----------------------------------------------------------------------------------
-
-		template<typename OsModel_P, typename RoutingTable_P, typename RandomNumber_P,
-typename Radio_P, typename Timer_P, typename Debug_P, typename Clock_P> const unsigned CtpRoutingEngine<
-OsModel_P, RoutingTable_P, RandomNumber_P, Radio_P, Timer_P, Debug_P,
-Clock_P>::root_nodes_[] = ROOT_NODES;
 
 // ----------------------------------------------------------------------------------
 
