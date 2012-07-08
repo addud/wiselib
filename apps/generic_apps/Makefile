@@ -47,7 +47,7 @@ feuerware:
 	make -f $(WISELIB_BASE)/apps/generic_apps/Makefile.feuerware ADD_CXXFLAGS=$(ADD_CXXFLAGS)
 
 isense:
-	make -f $(WISELIB_BASE)/apps/generic_apps/Makefile.isense JENNIC_CHIP=JN5139R1 ADD_CXXFLAGS=$(ADD_CXXFLAGS)
+	make -f $(WISELIB_BASE)/apps/generic_apps/Makefile.isense JENNIC_CHIP=JN5139R1 ADD_CXXFLAGS=$(ADD_CXXFLAGS) 2>&1| ./detemplate2
 
 isense.5148:
 	#make -f $(WISELIB_BASE)/apps/generic_apps/Makefile.isense JENNIC_CHIP=JN5148 ADD_CXXFLAGS="$(ADD_CXXFLAGS)"
@@ -57,13 +57,13 @@ lorien_sky:
 	make -f $(WISELIB_BASE)/apps/generic_apps/Makefile.lorien ADD_CXXFLAGS=$(ADD_CXXFLAGS)
 
 pc:
-	make -f $(WISELIB_BASE)/apps/generic_apps/Makefile.pc WISELIB_EXIT_MAIN=$(WISELIB_EXIT_MAIN) ADD_CXXFLAGS=$(ADD_CXXFLAGS)
+	make -f $(WISELIB_BASE)/apps/generic_apps/Makefile.pc WISELIB_EXIT_MAIN=$(WISELIB_EXIT_MAIN) ADD_CXXFLAGS=$(ADD_CXXFLAGS) 2>&1| ./detemplate2
 
 scw_msb:
 	make -f $(WISELIB_BASE)/apps/generic_apps/Makefile.scw scw_msb ADD_CXXFLAGS=$(ADD_CXXFLAGS)
 
 shawn:
-	make -f $(WISELIB_BASE)/apps/generic_apps/Makefile.shawn ADD_CXXFLAGS=$(ADD_CXXFLAGS)
+	make -f $(WISELIB_BASE)/apps/generic_apps/Makefile.shawn ADD_CXXFLAGS=$(ADD_CXXFLAGS) 2>&1| ./detemplate2
 
 trisos:
 	make -f $(WISELIB_BASE)/apps/generic_apps/Makefile.trisos ADD_CXXFLAGS=$(ADD_CXXFLAGS)
