@@ -27,9 +27,7 @@
 #include "util/base_classes/routing_base.h"
 #include "algorithms/routing/ctp/ctp_routing_engine_msg.h"
 #include "algorithms/routing/ctp/ctp_types.h"
-
-//Uncomment to enable general debug messages
-//#define ROUTING_ENGINE_DEBUG
+#include "algorithms/routing/ctp/ctp_debugging.h"
 
 #define RE_MAX_EVENT_RECEIVERS  2
 
@@ -220,10 +218,13 @@ public:
 		 * Insert the destination address at the beginning of the message
 		 * This helps differentiating between received routing beacons and data messages
 		 */
+		//TODO: Warning: variable length array
 		block_data_t buffer[len + sizeof(node_id_t)];
 		write<OsModel, block_data_t, node_id_t>(buffer, destination);
+
 		memcpy(buffer + sizeof(node_id_t), data, len);
 		len+=sizeof(node_id_t);
+
 		return radio().send(destination, len , buffer);
 	}
 
@@ -418,9 +419,7 @@ private:
 
 	// ----------------------------------------------------------------------------------
 
-	static const char * timeout_period_message_[];
-	static const unsigned debug_nodes_[DEBUG_NODES_NR];
-	static const unsigned root_nodes_[ROOT_NODES_NR];
+	static const char * timeout_period_message_[4];
 
 	// --------------------------------------------------------------------
 
@@ -479,20 +478,12 @@ private:
 	// ----------------------------------------------------------------------------------
 
 	void init_variables(void) {
-		int i;
-
 		self = radio().id();
 
 		//initialize RE parameters with default values
 		maxInterval = 512000;
 		minInterval = 128;
 		isRoot = false;
-		for (i = 0; i < ROOT_NODES_NR; i++) {
-			if (self == root_nodes_[i]) {
-				isRoot = true;
-				break;
-			}
-		}
 
 		ECNOff = true;
 		radioOn = true; // TO IMPLEMENT ------ radioOn in stdcontrol
@@ -532,7 +523,7 @@ private:
 		char buffer[1024];
 		int i;
 		for (i = 0; i < DEBUG_NODES_NR; i++) {
-			if (id() == debug_nodes_[i]) {
+			if (id() == nodes[debug_nodes[i]]) {
 				va_start(fmtargs, msg);
 				vsnprintf(buffer, sizeof(buffer) - 1, msg, fmtargs);
 				va_end(fmtargs);
@@ -848,6 +839,13 @@ private:
 		if (from == radio().id()) {
 			return;
 		}
+
+//#ifdef CTP_DEBUGGING
+//		if (!areConnected(self, from)) {
+//			return;
+//		}
+//#endif
+
 		//Read and remove the destination from the beginning of the message
 		node_id_t destination = read<OsModel, block_data_t, node_id_t>(data);
 		data += sizeof(node_id_t);
@@ -1210,24 +1208,10 @@ private:
 // ----------------------------------------------------------------------------------
 
 template<typename OsModel_P, typename RoutingTable_P, typename RandomNumber_P,
-		typename Radio_P, typename Timer_P, typename Debug_P, typename Clock_P> const unsigned CtpRoutingEngine<
-		OsModel_P, RoutingTable_P, RandomNumber_P, Radio_P, Timer_P, Debug_P,
-		Clock_P>::root_nodes_[] = ROOT_NODES;
-
-// ----------------------------------------------------------------------------------
-
-template<typename OsModel_P, typename RoutingTable_P, typename RandomNumber_P,
 		typename Radio_P, typename Timer_P, typename Debug_P, typename Clock_P> const char * CtpRoutingEngine<
 		OsModel_P, RoutingTable_P, RandomNumber_P, Radio_P, Timer_P, Debug_P,
 		Clock_P>::timeout_period_message_[] = { "BEACON_TIMER", "ROUTE_TIMER",
 		"POST_UPDATEROUTETASK", "POST_SENDBEACONTASK" };
-
-// ----------------------------------------------------------------------------------
-
-template<typename OsModel_P, typename RoutingTable_P, typename RandomNumber_P,
-		typename Radio_P, typename Timer_P, typename Debug_P, typename Clock_P> const unsigned CtpRoutingEngine<
-		OsModel_P, RoutingTable_P, RandomNumber_P, Radio_P, Timer_P, Debug_P,
-		Clock_P>::debug_nodes_[] = DEBUG_NODES;
 
 // ----------------------------------------------------------------------------------
 

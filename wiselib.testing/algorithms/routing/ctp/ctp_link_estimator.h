@@ -27,11 +27,10 @@
 #include "util/base_classes/routing_base.h"
 #include "algorithms/routing/ctp/ctp_link_estimator_msg.h"
 #include "algorithms/routing/ctp/ctp_types.h"
-
-//Uncomment to enable general debug messages
-//#define LINK_ESTIMATOR_DEBUG
+#include "algorithms/routing/ctp/ctp_debugging.h"
 
 #define LE_MAX_EVENT_RECEIVERS	2
+#define NEIGHBOR_TABLE_SIZE			10
 
 namespace wiselib {
 
@@ -222,7 +221,7 @@ public:
 	// -----------------------------------------------------------------------
 	// keep information about links from the neighbors
 
-	neighbor_table_entry_t* NeighborTable;
+	neighbor_table_entry_t NeighborTable[NEIGHBOR_TABLE_SIZE];
 	// link estimation sequence, increment every time a beacon is sent
 	uint8_t linkEstSeq;
 	// if there is not enough room in the packet to put all the neighbor table
@@ -232,8 +231,6 @@ public:
 
 	// Node id
 	node_id_t self;
-
-	int NEIGHBOR_TABLE_SIZE;
 
 	// -----------------------------------------------------------------------
 
@@ -506,8 +503,6 @@ private:
 	typename Clock::self_pointer_t clock_;
 	typename RandomNumber::self_pointer_t random_number_;
 
-	static const unsigned debug_nodes_[DEBUG_NODES_NR];
-
 	RecvCallbackVector recv_callbacks_;
 	EventCallbackVector event_callbacks_;
 
@@ -540,10 +535,11 @@ private:
 		//Id of the node (like TOS_NODE_ID)
 		self = radio().id();
 
-		NEIGHBOR_TABLE_SIZE = 10;
+
 
 		//TODO: Replace neighbor table
-		NeighborTable = new neighbor_table_entry_t[NEIGHBOR_TABLE_SIZE];
+//		NEIGHBOR_TABLE_SIZE = 10;
+//		NeighborTable = new neighbor_table_entry_t[NEIGHBOR_TABLE_SIZE];
 		linkEstSeq = 0;
 		prevSentIdx = 0;
 
@@ -557,7 +553,8 @@ private:
 		char buffer[1024];
 		int i;
 		for (i = 0; i < DEBUG_NODES_NR; i++) {
-			if (id() == debug_nodes_[i]) {
+
+			if (id() == nodes[debug_nodes[i]]) {
 				va_start(fmtargs, msg);
 				vsnprintf(buffer, sizeof(buffer) - 1, msg, fmtargs);
 				va_end(fmtargs);
@@ -582,10 +579,16 @@ private:
 			return;
 		}
 
+
+#ifdef CTP_DEBUGGING
+		if (!areConnected(self, from)) {
+			return;
+		}
+#endif
+
 		LinkEstimatorMsg* msg = reinterpret_cast<LinkEstimatorMsg*>(data);
 		processReceivedMessage(from, len, msg);
 		notify_receivers(from, len, msg->payload());
-
 	}
 
 	// --------------------------------------------------------------------
@@ -1014,13 +1017,6 @@ private:
 
 }
 ;
-
-// ----------------------------------------------------------------------------------
-
-template<typename OsModel_P, typename RoutingTable_P, typename RandomNumber_P,
-		typename Radio_P, typename Timer_P, typename Debug_P, typename Clock_P> const unsigned CtpLinkEstimator<
-		OsModel_P, RoutingTable_P, RandomNumber_P, Radio_P, Timer_P, Debug_P,
-		Clock_P>::debug_nodes_[] = DEBUG_NODES;
 
 // ----------------------------------------------------------------------------------
 
