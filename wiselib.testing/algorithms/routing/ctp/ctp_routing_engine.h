@@ -165,8 +165,6 @@ public:
 		debug().debug("Re: Boot for %d\n", self);
 #endif
 
-		radio().enable_radio();
-
 		routeInfoInit(&routeInfo);
 
 		// Call the corresponding rootcontrol command
@@ -186,7 +184,8 @@ public:
 		timer().template set_timer<self_type, &self_type::timer_elapsed>(15000,
 				this, 0);
 
-		return SUCCESS;
+		return radio().enable_radio();
+
 	}
 
 	// --------------------------------------------------------------------
@@ -197,7 +196,8 @@ public:
 		debug().debug("Re: Disable\n");
 #endif
 
-		return command_StdControl_stop();
+		command_StdControl_stop();
+		return radio().disable_radio();
 	}
 
 	// ----------------------------------------------------------------------------------
@@ -423,7 +423,9 @@ private:
 
 	// --------------------------------------------------------------------
 
-	bool ECNOff;
+	//Flag to enable/disable the alorithm's reaction to detecting a set Congestion flag in the message header
+	//TODO: Pass this as template parameter
+ 	bool ECNOff;
 	bool radioOn;
 	bool running;
 	bool justEvicted;
@@ -479,6 +481,8 @@ private:
 
 	void init_variables(void) {
 		self = radio().id();
+
+		//TODO: Pass configuration values as template parameters
 
 		//initialize RE parameters with default values
 		maxInterval = 512000;

@@ -85,6 +85,9 @@ public:
 	// -----------------------------------------------------------------------
 
 	value_t rand(value_t max_value) {
+		if (max_value<=0) {
+			max_value=RANDOM_MAX;
+		}
 			return clock().milliseconds(clock().time()) % max_value;
 	}
 

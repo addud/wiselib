@@ -3,12 +3,15 @@
  */
 #include "external_interface/external_interface.h"
 #include "algorithms/routing/ctp/ctp_routing_engine.h"
+#include "algorithms/routing/ctp/ctp_forwarding_engine.h"
 #include "algorithms/routing/ctp/ctp_link_estimator.h"
 #include "algorithms/routing/ctp/ctp_routing_table_value.h"
 #include "algorithms/routing/ctp/ctp_random_number.h"
+#include "algorithms/routing/ctp/ctp_debugging.h"
+#include "algorithms/routing/ctp/ctp_send_queue_value.h"
 #include "internal_interface/routing_table/routing_table_static_array.h"
 #include "util/base_classes/routing_base.h"
-#include "algorithms/routing/ctp/ctp_debugging.h"
+#include "util/pstl/queue_static.h"
 
 typedef wiselib::OSMODEL Os;
 typedef wiselib::CtpRoutingTableValue<Os::Radio> RoutingTableValue;
@@ -17,7 +20,13 @@ typedef wiselib::CtpRandomNumber<Os, Os::Clock, Os::Debug> RandomNumber;
 typedef wiselib::CtpLinkEstimator<Os, RoutingTable, RandomNumber, Os::Radio,
 		Os::Timer, Os::Debug, Os::Clock> LinkEstimator;
 typedef wiselib::CtpRoutingEngine<Os, RoutingTable, RandomNumber, LinkEstimator> RoutingEngine;
-typedef Os::TxRadio Radio;
+
+typedef wiselib::CtpSendQueueValue<Os::Radio> SendQueueValue;
+typedef wiselib::queue_static<Os, SendQueueValue*, 13> SendQueue;
+typedef wiselib::queue_static<Os, SendQueueValue*, 13> QueueEntryPool;
+typedef wiselib::vector_static<Os, Os::Radio::block_data_t*, 4> SentCache;
+typedef wiselib::CtpForwardingEngine<Os, SendQueueValue, SendQueue, QueueEntryPool, SentCache, RandomNumber, RoutingEngine> ForwardingEngine;
+typedef Os::Radio Radio;
 typedef Radio::node_id_t node_id_t;
 
 class CtpTest {
@@ -29,13 +38,15 @@ public:
 		debug_ = &wiselib::FacetProvider<Os, Os::Debug>::get_facet(value);
 		clock_ = &wiselib::FacetProvider<Os, Os::Clock>::get_facet(value);
 
-		radio_->set_power(Radio::TxPower::MAX);
+//		radio_->set_power(Radio::TxPower::MAX);
 		random_number_.init(*debug_, *clock_);
 
 		le_.init(*radio_, *timer_, *debug_, *clock_, random_number_);
 		re_.init(le_, *timer_, *debug_, *clock_, random_number_);
-
+		fe_.init(*radio_, *timer_, *debug_, *clock_, random_number_, re_);
 		re_.enable_radio();
+		fe_.enable_radio();
+
 
 		for (int i = 0; i < ROOT_NODES_NR; i++) {
 			if (radio_->id() == wiselib::nodes[wiselib::root_nodes[i]]) {
@@ -89,6 +100,7 @@ private:
 	RandomNumber random_number_;
 	LinkEstimator le_;
 	RoutingEngine re_;
+	ForwardingEngine fe_;
 };
 
 // --------------------------------------------------------------------------

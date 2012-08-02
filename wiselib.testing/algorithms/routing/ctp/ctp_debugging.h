@@ -30,14 +30,18 @@
 #define CTP_DEBUGGING
 
 //Uncomment to enable general RE debug messages
+//#define FORWARDING_ENGINE_DEBUG
+
+//Uncomment to enable general RE debug messages
 //#define ROUTING_ENGINE_DEBUG
 
 //Uncomment to enable general LE debug messages
 //#define LINK_ESTIMATOR_DEBUG
 
 #define NODES_NR												8
-//#define NODES														{410,411,412,413,414,415,416,417} //tubs isense ids
-#define NODES														{0,1,2,3,4,5,6,7} //Shawn ids
+#define NODES														{410,411,412,413,414,415,416,417} //tubs isense ids
+//#define NODES														{0,1,2,3,4,5,6,7} //Shawn ids
+
 
 /* All these numbers represent indexes of the node IDs in the NODES list. */
 

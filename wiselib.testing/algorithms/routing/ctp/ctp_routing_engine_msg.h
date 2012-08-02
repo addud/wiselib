@@ -133,7 +133,7 @@ namespace wiselib {
 		};
 
 		// -----------------------------------------------------------------------
-		//TODO: allocate only needed memory  aka 5 bytes
+
 		block_data_t buffer[sizeof(ctp_msg_options_t)+sizeof(node_id_t)+sizeof(ctp_msg_etx_t)];
 
 	};

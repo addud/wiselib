@@ -21,17 +21,17 @@
 * Author: Adrian Dudau <adrian@vermisoft.ro>
 */
 
-#ifndef __CTP_ROUTING_TABLE_VALUE_H__
-#define __CTP_ROUTING_TABLE_VALUE_H__
+#ifndef __CTP_SEND_QUEUE_VALUE_H__
+#define __CTP_SEND_QUEUE_VALUE_H__
 
 #include "algorithms/routing/ctp/ctp_types.h"
 
 namespace wiselib {
 	template<typename Radio_P>
-	class CtpRoutingTableValue {
+	class CtpSendQueueValue {
 	public:
 		typedef Radio_P Radio;
-		typedef typename Radio::node_id_t node_id_t;
+		typedef typename Radio::block_data_t block_data_t;
 
 		// ----------------------------------------------------------------------------------
 
@@ -41,20 +41,18 @@ namespace wiselib {
 
 		// ----------------------------------------------------------------------------------
 
-		node_id_t parent;
-		ctp_msg_etx_t etx;
-		bool haveHeard;
-		bool congested;
+		block_data_t* msg;
+		size_t len;
+		uint8_t client;
+		uint8_t retries;
 
 		// -----------------------------------------------------------------
 
-		CtpRoutingTableValue() :
-		parent(Radio_P::NULL_NODE_ID), etx(MAX_METRIC), haveHeard(false), congested(
-			false) {
+		CtpSendQueueValue() {
 		}
 
 		// -----------------------------------------------------------------
 	};
 
 }
-#endif /* __CTP_ROUTING_TABLE_VALUE_H__ */
+#endif /* __CTP_SEND_QUEUE_VALUE_H__ */

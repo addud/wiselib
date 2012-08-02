@@ -275,8 +275,6 @@ public:
 		debug().debug( "LE: Boot for %d\n", radio().id() );
 #endif
 
-		radio().enable_radio();
-
 		radio().template reg_recv_callback<self_type, &self_type::receive>(
 				this);
 
@@ -284,14 +282,13 @@ public:
 		random_number().srand(
 				clock().milliseconds(clock().time()) * (3 * radio().id() + 2));
 
-		return SUCCESS;
+		return radio().enable_radio();
 	}
 
 	// -----------------------------------------------------------------------
 
 	int disable_radio(void) {
-
-		return SUCCESS;
+		return radio().disable_radio();
 	}
 
 	// -----------------------------------------------------------------------

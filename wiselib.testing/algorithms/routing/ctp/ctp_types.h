@@ -32,16 +32,6 @@ namespace wiselib
    typedef uint8_t ctp_msg_options_t;
    typedef uint16_t ctp_msg_etx_t;
 
-//   enum {
-//       SUCCESS = 1,
-//       FAIL = 2,
-//       EBUSY = 3,
-//       ERETRY = 4,
-//       ECANCEL = 5,
-//       EOFF = 6,
-//       ESIZE = 7
-//   } error_t;
-
    typedef int error_t;
 
 }
