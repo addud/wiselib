@@ -221,11 +221,9 @@ public:
 		//TODO: Warning: variable length array
 		block_data_t buffer[len + sizeof(node_id_t)];
 		write<OsModel, block_data_t, node_id_t>(buffer, destination);
-
 		memcpy(buffer + sizeof(node_id_t), data, len);
-		len+=sizeof(node_id_t);
-
-		return radio().send(destination, len , buffer);
+		len += sizeof(node_id_t);
+		return radio().send(destination, len, buffer);
 	}
 
 	template<class T, void (T::*TMethod)(node_id_t, size_t, block_data_t*)>
@@ -294,6 +292,7 @@ public:
 	// -------------------------------------------------------------------------
 
 	error_t command_CtpInfo_getEtx(ctp_msg_etx_t* etx) {
+		echo("6");
 		if (etx == NULL)
 			return ERR_UNSPEC;
 		if (routeInfo.parent == INVALID_ADDR)
@@ -302,11 +301,14 @@ public:
 			*etx = 0;
 		} else {
 			// path etx = etx(parent) + etx(link to the parent)
+			echo("7");
 			*etx = routeInfo.etx
 					+ evaluateEtx(
 							radio().command_LinkEstimator_getLinkQuality(
 									routeInfo.parent));
+			echo("8");
 		}
+		echo("9");
 		return SUCCESS;
 	}
 
@@ -425,7 +427,7 @@ private:
 
 	//Flag to enable/disable the alorithm's reaction to detecting a set Congestion flag in the message header
 	//TODO: Pass this as template parameter
- 	bool ECNOff;
+	bool ECNOff;
 	bool radioOn;
 	bool running;
 	bool justEvicted;
@@ -853,10 +855,11 @@ private:
 		//Read and remove the destination from the beginning of the message
 		node_id_t destination = read<OsModel, block_data_t, node_id_t>(data);
 		data += sizeof(node_id_t);
-		len-=sizeof(node_id_t);
+		len -= sizeof(node_id_t);
 
 		if (destination != BROADCAST_ADDRESS) {
 			//Data message => forward to the FE
+			echo("to FE length %d",len);
 			notify_receivers(from, len, data);
 		} else {
 			//Routing beacon => process inside the RE

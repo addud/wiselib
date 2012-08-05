@@ -27,10 +27,11 @@
 #include "algorithms/routing/ctp/ctp_types.h"
 
 namespace wiselib {
-	template<typename Radio_P>
+	template<typename Radio_P, typename Message_P>
 	class CtpSendQueueValue {
 	public:
 		typedef Radio_P Radio;
+		typedef Message_P Message;
 		typedef typename Radio::block_data_t block_data_t;
 
 		// ----------------------------------------------------------------------------------
@@ -41,7 +42,7 @@ namespace wiselib {
 
 		// ----------------------------------------------------------------------------------
 
-		block_data_t* msg;
+		Message* msg;
 		size_t len;
 		uint8_t retries;
 

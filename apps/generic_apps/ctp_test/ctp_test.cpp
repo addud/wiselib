@@ -21,10 +21,12 @@ typedef wiselib::CtpLinkEstimator<Os, RoutingTable, RandomNumber, Os::Radio,
 		Os::Timer, Os::Debug, Os::Clock> LinkEstimator;
 typedef wiselib::CtpRoutingEngine<Os, RoutingTable, RandomNumber, LinkEstimator> RoutingEngine;
 
-typedef wiselib::CtpSendQueueValue<Os::Radio> SendQueueValue;
+typedef wiselib::CtpForwardingEngineMsg<Os, Os::Radio> DataMessage;
+typedef wiselib::CtpSendQueueValue<Os::Radio,DataMessage> SendQueueValue;
 typedef wiselib::queue_static<Os, SendQueueValue*, 13> SendQueue;
-typedef wiselib::vector_static<Os, Os::Radio::block_data_t*, 4> SentCache;
-typedef wiselib::CtpForwardingEngine<Os, SendQueueValue, SendQueue, SentCache, RandomNumber, RoutingEngine> ForwardingEngine;
+typedef wiselib::vector_static<Os, DataMessage*, 4> SentCache;
+typedef wiselib::CtpForwardingEngine<Os, DataMessage, SendQueueValue, SendQueue, SentCache,
+		RandomNumber, RoutingEngine, RoutingEngine> ForwardingEngine;
 typedef Os::Radio Radio;
 typedef Radio::node_id_t node_id_t;
 
@@ -42,10 +44,9 @@ public:
 
 		le_.init(*radio_, *timer_, *debug_, *clock_, random_number_);
 		re_.init(le_, *timer_, *debug_, *clock_, random_number_);
-		fe_.init(*radio_, *timer_, *debug_, *clock_, random_number_, re_);
-		re_.enable_radio();
+		fe_.init(re_, *timer_, *debug_, *clock_, random_number_, re_);
 		fe_.enable_radio();
-
+//		re_.enable_radio();
 
 		for (int i = 0; i < ROOT_NODES_NR; i++) {
 			if (radio_->id() == wiselib::nodes[wiselib::root_nodes[i]]) {
@@ -56,11 +57,11 @@ public:
 
 		debug_->debug("Node %d started", radio_->id());
 
-		re_.reg_event_callback < CtpTest, &CtpTest::event > (this);
-		re_.reg_recv_callback < CtpTest, &CtpTest::receive_radio_message
-				> (this);
+//		re_.reg_event_callback < CtpTest, &CtpTest::event > (this);
+//		re_.reg_recv_callback < CtpTest, &CtpTest::receive_radio_message
+//				> (this);
 
-		if (radio_->id() == wiselib::nodes[3]) {
+		if (radio_->id() == wiselib::nodes[2]) {
 			timer_->set_timer < CtpTest, &CtpTest::start > (12000, this, 0);
 		}
 	}
@@ -69,15 +70,16 @@ public:
 		Os::Radio::block_data_t message[] = "ac\0";
 		debug_->debug("%d: APP: sends to %d\n", radio_->id(),
 				re_.command_Routing_nextHop());
-		re_.send(re_.command_Routing_nextHop(), sizeof(message), message);
+//		re_.send(re_.command_Routing_nextHop(), sizeof(message), message);
+		fe_.send(Radio::NULL_NODE_ID, sizeof(message), message);
 
-		// following can be used for periodic messages to sink
-		timer_->set_timer < CtpTest, &CtpTest::start > (5000, this, 0);
+// following can be used for periodic messages to sink
+//		timer_->set_timer < CtpTest, &CtpTest::start > (5000, this, 0);
 	}
 	// --------------------------------------------------------------------
 	void receive_radio_message(Os::Radio::node_id_t from, Os::Radio::size_t len,
 			Os::Radio::block_data_t *buf) {
-//		debug_->debug("  message is %s\n", buf);
+		debug_->debug("  message is %s\n", buf);
 		if (re_.command_RootControl_isRoot()) {
 			debug_->debug("%d: APP Packet reached the root\n", radio_->id());
 		} else {

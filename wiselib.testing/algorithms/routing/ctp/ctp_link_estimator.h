@@ -133,8 +133,7 @@ public:
 
 	enum Restrictions {
 		//TODO: Compute max message length
-		MSG_HEADER_SIZE = LinkEstimatorMsg::HEADER_SIZE, // LinkEstimator header overhead
-		MAX_MESSAGE_LENGTH = Radio_P::MAX_MESSAGE_LENGTH - MSG_HEADER_SIZE, ///< Maximal number of bytes in payload minus the LE header and footer
+		MAX_MESSAGE_LENGTH = Radio_P::MAX_MESSAGE_LENGTH -LinkEstimatorMsg::HEADER_SIZE, ///< Maximal number of bytes in payload minus the LE header and footer
 		RANDOM_MAX = RandomNumber::RANDOM_MAX ///< Maximum random number that can be generated
 	};
 
@@ -486,7 +485,7 @@ public:
 		}
 
 		return radio().send(addr,
-				lePkt.HEADER_SIZE + lePkt.ne() * sizeof(neighbor_stat_entry)
+				LinkEstimatorMsg::HEADER_SIZE + lePkt.ne() * sizeof(neighbor_stat_entry)
 						+ size, (block_data_t*) &lePkt);
 	}
 
@@ -585,7 +584,7 @@ private:
 
 		LinkEstimatorMsg* msg = reinterpret_cast<LinkEstimatorMsg*>(data);
 		processReceivedMessage(from, len, msg);
-		notify_receivers(from, len, msg->payload());
+		notify_receivers(from, len - LinkEstimatorMsg::HEADER_SIZE - msg->ne() * sizeof(neighbor_stat_entry), msg->payload());
 	}
 
 	// --------------------------------------------------------------------
@@ -728,7 +727,7 @@ private:
 		uint8_t j=0, k;
 		uint8_t maxEntries, newPrevSentIdx=0;
 
-		maxEntries = ((MAX_MESSAGE_LENGTH - MSG_HEADER_SIZE - len)
+		maxEntries = ((MAX_MESSAGE_LENGTH - LinkEstimatorMsg::HEADER_SIZE - len)
 				/ sizeof(neighbor_stat_entry_t));
 
 		for (int i = 0; i < NEIGHBOR_TABLE_SIZE && j < maxEntries; i++) {
