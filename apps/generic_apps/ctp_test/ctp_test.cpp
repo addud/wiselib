@@ -23,9 +23,8 @@ typedef wiselib::CtpRoutingEngine<Os, RoutingTable, RandomNumber, LinkEstimator>
 
 typedef wiselib::CtpSendQueueValue<Os::Radio> SendQueueValue;
 typedef wiselib::queue_static<Os, SendQueueValue*, 13> SendQueue;
-typedef wiselib::queue_static<Os, SendQueueValue*, 13> QueueEntryPool;
 typedef wiselib::vector_static<Os, Os::Radio::block_data_t*, 4> SentCache;
-typedef wiselib::CtpForwardingEngine<Os, SendQueueValue, SendQueue, QueueEntryPool, SentCache, RandomNumber, RoutingEngine> ForwardingEngine;
+typedef wiselib::CtpForwardingEngine<Os, SendQueueValue, SendQueue, SentCache, RandomNumber, RoutingEngine> ForwardingEngine;
 typedef Os::Radio Radio;
 typedef Radio::node_id_t node_id_t;
 

@@ -35,8 +35,7 @@
 namespace wiselib {
 
 template<typename OsModel_P, typename SendQueueValue_P, typename SendQueue_P,
-		typename QueueEntryPool_P,typename SentCache_P,
-		typename RandomNumber_P, typename RoutingEngine_P,
+		typename SentCache_P, typename RandomNumber_P, typename RoutingEngine_P,
 		typename Radio_P = typename OsModel_P::Radio,
 		typename Timer_P = typename OsModel_P::Timer,
 		typename Debug_P = typename OsModel_P::Debug,
@@ -45,9 +44,7 @@ class CtpForwardingEngine: public RoutingBase<OsModel_P, Radio_P> {
 public:
 	typedef OsModel_P OsModel;
 	typedef SendQueueValue_P SendQueueValue;
-	typedef RandomNumber_P RandomNumber;
 	typedef SendQueue_P SendQueue;
-	typedef QueueEntryPool_P QueueEntryPool;
 	typedef SentCache_P SentCache;
 	typedef RandomNumber_P RandomNumber;
 	typedef RoutingEngine_P RoutingEngine;
@@ -55,10 +52,6 @@ public:
 	typedef Timer_P Timer;
 	typedef Debug_P Debug;
 	typedef Clock_P Clock;
-
-	typedef CtpForwardingEngine<OsModel, SendQueue, QueueEntryPool, MessagePool,
-			SentCache, RandomNumber, RoutingEngine, Radio, Timer, Debug> self_type;
-	typedef self_type* self_pointer_t;
 
 	typedef typename Radio::node_id_t node_id_t;
 	typedef typename Radio::size_t size_t;
@@ -69,10 +62,12 @@ public:
 	typedef typename Clock::time_t time_t;
 	typedef typename RandomNumber::value_t value_t;
 
-	typedef typename SendQueueValue fe_queue_entry_t;
+	typedef SendQueueValue fe_queue_entry_t;
 	typedef typename SentCache::iterator SentCacheIterator;
 
-	typedef CtpForwardingEngineMsg<OsModel, Radio> DataMessage;
+	typedef CtpForwardingEngine<OsModel, SendQueueValue, SendQueue, SentCache,
+			RandomNumber, RoutingEngine, Radio, Timer, Debug> self_type;
+	typedef self_type* self_pointer_t;
 
 	typedef delegate3<void, node_id_t, size_t, block_data_t*> radio_delegate_t;
 	typedef vector_static<OsModel, radio_delegate_t, RADIO_BASE_MAX_RECEIVERS> RecvCallbackVector;
@@ -81,6 +76,8 @@ public:
 	typedef delegate1<void, uint8_t> event_delegate_t;
 	typedef vector_static<OsModel, event_delegate_t, FE_MAX_EVENT_RECEIVERS> EventCallbackVector;
 	typedef typename EventCallbackVector::iterator EventCallbackVectorIterator;
+
+	typedef CtpForwardingEngineMsg<OsModel, Radio> DataMessage;
 
 	// --------------------------------------------------------------------
 
@@ -136,10 +133,6 @@ public:
 	};
 
 	enum {
-		CLIENT_COUNT = 1, DEFAULT_CLIENT_ID = 0,
-	};
-
-	enum {
 		RETXTIMER = 1, CONGESTION_TIMER = 2, POST_SENDTASK = 3,
 	};
 
@@ -153,8 +146,6 @@ public:
 	node_id_t lastParent;
 	uint8_t seqno;
 
-	// Single client support.
-	uint8_t global_client;
 	fe_queue_entry_t clientEntries;
 	fe_queue_entry_t* clientPtrs;
 
@@ -168,8 +159,6 @@ public:
 //	// Needed for SentCache Interface.
 	SentCache sentCache;
 	int sentCacheSize;
-
-	QueueEntryPool qEntryPool;
 
 	RoutingEngine cre;
 
@@ -226,9 +215,6 @@ public:
 				clock().milliseconds(clock().time()) * (3 * self + 2));
 
 		radio().template reg_recv_callback<self_type, &self_type::receive>(
-				this);
-
-		radio().template reg_event_callback<self_type, &self_type::rcv_event>(
 				this);
 
 		timer().template set_timer<self_type, &self_type::timer_elapsed>(15000,
@@ -373,13 +359,6 @@ private:
 
 		sentCacheSize = 4; //messages
 
-		// this variable replaces the client parameter in the CtpForwardingEngine.
-		global_client = DEFAULT_CLIENT_ID;
-
-//		// The Pool template emulates the Pool component in TinyOs. It is defined in Pool.h
-//		messagePool = new Pool<cPacket>(queueMaxSize - 1); // replaces "Pool<message_t> as MessagePool"
-//		qEntryPool = new Pool<SendQueueValue>(queueMaxSize - 1); // replaces "Pool<fe_queue_entry_t> as QEntryPool"
-
 		clientCongested = false;
 		parentCongested = false;
 		running = false;
@@ -485,61 +464,40 @@ private:
 	 * put it on the send queue.
 	 */
 	void forward(DataMessage* msg) {
-		if (qEntryPool->command_Pool_empty()) {
-			echo("forward - cannot forward, queue entry pool empty");
+		fe_queue_entry_t* qe;
+		uint16_t gradient;
+
+		// There are two memset useless in our implementation: they have been removed
+
+		qe->msg = (block_data_t*) msg;
+		qe->retries = MAX_RETRIES;
+
+		if (command_SendQueue_enqueue(qe) == SUCCESS) {
+			// Loop-detection code:
+			if (cre.command_CtpInfo_getEtx(&gradient) == SUCCESS) {
+				// We only check for loops if we know our own metric
+				if (msg->etx() <= gradient) {
+					// If our etx metric is less than or equal to the etx value
+					// on the packet (etx of the previous hop node), then we believe
+					// we are in a loop.
+					// Trigger a route update and backoff.
+					echo("Possible Loop Detection...");
+					cre.command_CtpInfo_triggerImmediateRouteUpdate();
+					startRetxmitTimer(LOOPY_WINDOW, LOOPY_OFFSET);
+				}
+			}
+
+			if (!reTxTimerIsRunning) {
+				// sendTask is only immediately posted if we don't detect a
+				// loop.
+				post_sendTask();
+			}
+
+			// Successful function exit point:
+			return;
 		} else {
-			fe_queue_entry_t* qe;
-			uint16_t gradient;
-
-			qe = qEntryPool->command_Pool_get();
-			if (qe == NULL) {
-				echo("Forward Dropped - qEntryPool full");
-				return;
-			}
-
-			// There are two memset useless in our implementation: they have been removed
-
-			qe->msg = msg;
-			qe->client = 0xff;
-			qe->retries = MAX_RETRIES;
-
-			if (command_SendQueue_enqueue(qe) == SUCCESS) {
-				trace() << "forward - forwarding packet with queue size "
-						<< (int) command_SendQueue_size();
-				// Loop-detection code:
-				if (cre->command_CtpInfo_getEtx(&gradient) == SUCCESS) {
-					// We only check for loops if we know our own metric
-					if (command_CtpPacket_getEtx(m) <= gradient) {
-						// If our etx metric is less than or equal to the etx value
-						// on the packet (etx of the previous hop node), then we believe
-						// we are in a loop.
-						// Trigger a route update and backoff.
-						trace() << "Possible Loop Detection...";
-						cre->command_CtpInfo_triggerImmediateRouteUpdate();
-						startRetxmitTimer(LOOPY_WINDOW, LOOPY_OFFSET);
-					}
-				}
-
-				if (!reTxTimerIsRunning) {
-					// sendTask is only immediately posted if we don't detect a
-					// loop.
-					post_sendTask();
-				}
-
-				// Successful function exit point:
-				return;
-			} else {
-				collectOutput("Ctp Data", "Forward Dropped - sendQueue full");
-				emit(registerSignal("CfeTxDroppedSendQueueFull"), self);
-
-				// There was a problem enqueuing to the send queue.
-				if (qEntryPool->command_Pool_put(qe) != SUCCESS)
-					trace() << "qentry put pool error";
-			}
+			echo("There was a problem enqueuing to the send queue.");
 		}
-
-		// NB: at this point, we have a resource acquistion problem.
-		echo("Resource Acquisition problem, drop packet...");
 	}
 
 	/*
@@ -551,7 +509,7 @@ private:
 	 * If this node is a root, signal receive.
 	 */
 	void receive(node_id_t from, size_t len, block_data_t *data) {
-		DataMessage* msg = data;
+		DataMessage* msg = reinterpret_cast<DataMessage*>(data);
 
 		bool duplicate = false;
 		fe_queue_entry_t* qe;
@@ -565,14 +523,14 @@ private:
 
 		//See if we remember having seen this packet
 		//We look in the sent cache ...
-		if (command_SentCache_lookup(msg)) {
+		if (command_SentCache_lookup(data)) {
 			return;
 		}
 		//... and in the queue for duplicates
 		if (command_SendQueue_size() > 0) {
 			for (i = command_SendQueue_size(); --i;) {
 				qe = command_SendQueue_element(i);
-				if (command_CtpPacket_matchInstance(qe->msg, msg)) {
+				if (command_CtpPacket_matchInstance(qe->msg, data)) {
 					duplicate = true;
 					break;
 				}
@@ -586,10 +544,10 @@ private:
 		// If I'm the root, signal receive.
 		else if (cre.command_RootControl_isRoot()) {
 			// sends the packet to application layer.
-			notify_receivers(from,len-DataMessage::HeaderSize, msg->payload());
+			notify_receivers(from, len - DataMessage::HEADER_SIZE,
+					msg->payload());
 			return;
-		}
-		else {
+		} else {
 			forward(msg);
 		}
 	}
@@ -625,8 +583,8 @@ private:
 	bool command_CtpPacket_matchInstance(block_data_t* msg1,
 			block_data_t* msg2) {
 
-		DataMessage* pkt1 = (DataMessage*) msg1;
-		DataMessage* pkt2 = (DataMessage*) msg2;
+		DataMessage* pkt1 = reinterpret_cast<DataMessage*>(msg1);
+		DataMessage* pkt2 = reinterpret_cast<DataMessage*>(msg2);
 
 		return (pkt1->origin() == pkt2->origin()
 				&& pkt1->seqno() == pkt2->seqno() && pkt1->thl() == pkt2->thl());
@@ -685,7 +643,6 @@ private:
 		qe = clientPtrs;
 		qe->msg = msg;
 		qe->len = len + DataMessage::HEADER_SIZE;
-		qe->client = global_client;
 		qe->retries = MAX_RETRIES;
 
 		if (command_SendQueue_enqueue(qe) == SUCCESS) {
@@ -737,17 +694,6 @@ private:
 			if (command_SentCache_lookup(qe->msg)) { // NOT CHECKED
 				command_SendQueue_dequeue();
 
-				if (!messagePool.full()) {
-					messagePool.push(qe->msg);
-				} else {
-					echo("message pool error.");
-				}
-
-				if (!qEntryPool.full()) {
-					qEntryPool.push(qe);
-				} else {
-					echo("qentry error.");
-				}
 				post_sendTask();
 				return;
 			}
@@ -781,22 +727,22 @@ private:
 				gradient = 0;
 			}
 
-			((DataMessage*) qe->msg)->set_etx(gradient);
+			(reinterpret_cast<DataMessage*>(qe->msg))->set_etx(gradient);
 
 			ackPending = true; // the acknowledgement is automatically requested for Unicast packets in the implemented CC2420Mac
 
 			// Set or clear the congestion bit on *outgoing* packets.
 			if (command_CtpCongestion_isCongested()) {
-				((DataMessage*) qe->msg)->set_congestion();
+				(reinterpret_cast<DataMessage*>(qe->msg))->set_congestion();
 			} else {
-				((DataMessage*) qe->msg)->clear_congestion();
+				(reinterpret_cast<DataMessage*>(qe->msg))->clear_congestion();
 			}
 
 			//TODO: Send message to the RE
 			subsendResult = radio().send(dest, qe->len, qe->msg);
 
 			//TODO: Implement callback to send_done event from RE
-			event_SubSend_sendDone(qe->msg,subsendResult);
+			event_SubSend_sendDone(qe->msg, subsendResult);
 
 //				subsendResult = db->command_Send_send(dest, qe->msg->dup()); // the duplicate will be sent via the dual buffer module. we keep a copy here that will be deleted fater the sendDone.
 //				if (subsendResult == SUCCESS) { // CHECK -> OK
@@ -839,102 +785,56 @@ private:
 	 *
 	 */
 
-	//TODO: this is based on message ack, which I haven't implemented under the LE radio yet
-	//must take care of this after implementing msg acking
-//	void event_SubSend_sendDone(cMessage* msg, error_t error) {
-//		fe_queue_entry_t *qe = command_SendQueue_head();
-//
-//		if (qe == NULL /*|| qe->msg != msg*/) { // cannot check the pointer since I dup the message
-//			echo("BUG1"); // it should never happen.
-//		} else if (error != SUCCESS) { // NOT CHECKED
-//			// Immediate retransmission is the worst thing to do.
-//			echo("SubSend.sendDone - Send failed");
-//			startRetxmitTimer(SENDDONE_FAIL_WINDOW, SENDDONE_FAIL_OFFSET);
-//		} else if (ackPending
-//				&& !command_PacketAcknowledgements_wasAcked(msg)) { // CHECK -> OK: see inner statements
-//				// AckPending is for case when DL cannot support acks.
-//			le->command_LinkEstimator_txNoAck(
-//					command_AMPacket_destination(msg));
-//			cre->command_CtpInfo_recomputeRoutes();
-//			if (--qe->retries) { // CHECK -> OK: packet retxmitted after SENDDONE_NOACK_WINDOW.
-//				trace() << "SubSend.sendDone - not acked.";
-//				emit(registerSignal("CfeTxDoneNoAck"), self);
-//				startRetxmitTimer(SENDDONE_NOACK_WINDOW, SENDDONE_NOACK_OFFSET);
-//			} else { // CHECK -> OK: see inner statements
-//				//max retries, dropping packet
-//				collectOutput("Ctp Data", "Tx Dropped - max retries");
-//				if (qe->client < CLIENT_COUNT) { // CHECK -> OK: packet dropped as expected.
-//					clientPtrs = qe;
-//					delete qe->msg; // Needed for OMNET++ : msg dup() in DualBuffer
-//					signal_Send_sendDone(FAIL);
-//					emit(registerSignal("CfeTxDoneDroppedMaxRetriesClient"),
-//							self);
-//					trace()
-//							<< "Subsend.sendDone - Max retries reached for client packet, dropping.";
-//				} else { // CHECK -> OK: packet dropped as expected. No pools errors.
-//					trace()
-//							<< "Subsend.sendDone - Max retries reached for forwarded packet, dropping.";
-//					emit(registerSignal("CfeTxDoneDroppedMacRetriesForwarded"),
-//							self);
-//					if (messagePool->command_Pool_put(qe->msg) != SUCCESS)
-//						trace() << "Message pool error.";
-//					delete qe->msg; // as stated in the forward function, the message is stored in another place than the messagePool, thus it must be deleted manually.
-//					if (qEntryPool->command_Pool_put(qe) != SUCCESS)
-//						trace() << "QEntryPool error.";
-//				}
-//				command_SendQueue_dequeue();
-//				sending = false;
-//				startRetxmitTimer(SENDDONE_OK_WINDOW, SENDDONE_OK_OFFSET);
-//			}
-//		} else if (qe->client < CLIENT_COUNT) { // CHECK -> OK: packet successfully txmitted and removed from queue.
-//			// there was a pointer to header that was never used... we have removed it.
-//			trace() << "silviastats 1 " << self << " "
-//					<< (int) cre->command_Routing_nextHop() << " "
-//					<< (int) command_CtpPacket_getOrigin(qe->msg) << " "
-//					<< (int) command_CtpPacket_getSequenceNumber(qe->msg) << " "
-//					<< (int) command_CtpPacket_getThl(qe->msg);
-//			emit(registerSignal("CfeTxDoneOkClient"), self);
-//			uint8_t client = qe->client;
-//			trace() << "SubSend_sendDone - Our packet for client "
-//					<< (int) client << " , remove from queue.";
+	void event_SubSend_sendDone(block_data_t* msg, error_t error) {
+		fe_queue_entry_t *qe = command_SendQueue_head();
+
+		if (qe == NULL /*|| qe->msg != msg*/) { // cannot check the pointer since I dup the message
+			echo("BUG: this should never happen");
+		} else if (error != SUCCESS) { // NOT CHECKED
+			// Immediate retransmission is the worst thing to do.
+			echo("SubSend.sendDone - Send failed");
+			startRetxmitTimer(SENDDONE_FAIL_WINDOW, SENDDONE_FAIL_OFFSET);
+
+			//TODO: this is based on message ack, which I haven't implemented under the LE radio yet
+			//must take care of this after implementing msg acking
+		} else if (ackPending
+				&& !command_PacketAcknowledgements_wasAcked(msg)) { // CHECK -> OK: see inner statements
+				// AckPending is for case when DL cannot support acks.
+//			le->command_LinkEstimator_txNoAck();
+			cre.command_CtpInfo_recomputeRoutes();
+			if (--qe->retries) { // CHECK -> OK: packet retxmitted after SENDDONE_NOACK_WINDOW.
+				echo("SubSend.sendDone - not acked.");
+				startRetxmitTimer(SENDDONE_NOACK_WINDOW, SENDDONE_NOACK_OFFSET);
+			} else { // CHECK -> OK: see inner statements
+				//max retries, dropping packet
+				echo("Tx Dropped - max retries");
+				clientPtrs = qe;
+
+				command_SendQueue_dequeue();
+				sending = false;
+				startRetxmitTimer(SENDDONE_OK_WINDOW, SENDDONE_OK_OFFSET);
+			}
+		} else { // CHECK -> OK: packet successfully txmitted and removed from queue.
+				 // there was a pointer to header that was never used... i have removed it.
+
+			//TODO: Enable acking when implemented
 //			le->command_LinkEstimator_txAck(command_AMPacket_destination(msg));
-//			clientPtrs = qe;
-//			delete qe->msg; // Needed for OMNET++ : msg dup() in DualBuffer
-//			command_SendQueue_dequeue();
-//			signal_Send_sendDone(SUCCESS);
-//			sending = false;
-//			startRetxmitTimer(SENDDONE_OK_WINDOW, SENDDONE_OK_OFFSET);
-//		} else if (messagePool->command_Pool_size()
-//				< messagePool->command_Pool_maxSize()) { // CHECK -> OK: packet forwarded and no errors pools.
-//				// A successfully forwarded packet.
-//			trace() << "silviastats 1 " << self << " "
-//					<< (int) cre->command_Routing_nextHop() << " "
-//					<< (int) command_CtpPacket_getOrigin(qe->msg) << " "
-//					<< (int) command_CtpPacket_getSequenceNumber(qe->msg) << " "
-//					<< (int) command_CtpPacket_getThl(qe->msg);
-//			emit(registerSignal("CfeTxDoneOkForwarded"), self);
-//			trace() << "SubSend.sendDone - successfully forwarded (client: "
-//					<< (int) qe->client << ") packet, message pool is "
-//					<< (int) messagePool->command_Pool_size() << "/"
-//					<< (int) messagePool->command_Pool_maxSize();
-//			le->command_LinkEstimator_txAck(command_AMPacket_destination(msg));
-//			command_SentCache_insert(qe->msg);
-//			command_SendQueue_dequeue();
-//			if (messagePool->command_Pool_put(qe->msg) != SUCCESS)
-//				trace() << "MessagePool error."; // the message is still there (sentCache has a pointer to it), but can be overwritten, is it correct?
-//			if (qEntryPool->command_Pool_put(qe) != SUCCESS)
-//				trace() << "QEntryPool error.";
-//			sending = false;
-//			startRetxmitTimer(SENDDONE_OK_WINDOW, SENDDONE_OK_OFFSET);
-//		} else {
-//			//      dbg("Forwarder", "%s: BUG: we have a pool entry, but the pool is full, client is %hhu.\n", __FUNCTION__, qe->client);
-//			opp_error("Bug2");
-//			// someone has double-stored a pointer somewhere and we have nowhere
-//			// to put this, so we have to leak it...
-//		}
-//	}
+			clientPtrs = qe;
+			command_SentCache_insert(qe->msg);
+			command_SendQueue_dequeue();
+			sending = false;
+			startRetxmitTimer(SENDDONE_OK_WINDOW, SENDDONE_OK_OFFSET);
+		}
+	}
 // ----------------------------------------------------------------------------------
-	// SendQueue Interface -------------------------------------------------------
+
+//TODO: Implement data packet acknowledgement
+	bool command_PacketAcknowledgements_wasAcked(block_data_t *msg) {
+		//dummy
+		return true;
+	}
+
+// SendQueue Interface -------------------------------------------------------
 	size_t command_SendQueue_maxSize() {
 		return sendqueue.max_size();
 	}
@@ -992,7 +892,7 @@ private:
 	fe_queue_entry_t* command_SendQueue_head() {
 		return sendqueue.front();
 	}
-	// ------------------------------------------------------------------------
+// ------------------------------------------------------------------------
 
 	void command_SentCache_insert(block_data_t* pkt) {
 		if ((uint8_t) sentCache.size() == sentCacheSize) { // remove the oldest element

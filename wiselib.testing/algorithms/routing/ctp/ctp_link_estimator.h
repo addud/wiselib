@@ -879,14 +879,12 @@ private:
 	// called when new beacon estimate is done
 	// also called when new DEETX estimate is done
 	void updateEETX(neighbor_table_entry_t *ne, uint16_t newEst) {
-		//TODO: Use actual ETX instead of constant one
 		ne->eetx = (ALPHA * ne->eetx + (10 - ALPHA) * newEst)/10;
-//		ne->eetx = 1;
 	}
 
 	// ----------------------------------------------------------------------------------
 
-	//TODO: updateDEETX like in original when TX acknowledged
+	//TODO: updateDEETX (Data driven ETX) when TX acknowledged
 
 	// EETX (Extra Expected number of Transmission)
 	// EETX = ETX - 1

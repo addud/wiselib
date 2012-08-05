@@ -43,7 +43,6 @@ namespace wiselib {
 
 		block_data_t* msg;
 		size_t len;
-		uint8_t client;
 		uint8_t retries;
 
 		// -----------------------------------------------------------------
