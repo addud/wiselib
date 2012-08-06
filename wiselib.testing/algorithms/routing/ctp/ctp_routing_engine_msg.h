@@ -142,7 +142,7 @@ namespace wiselib {
 
 		// -----------------------------------------------------------------------
 
-		block_data_t buffer[sizeof(ctp_msg_options_t)+sizeof(node_id_t)+sizeof(ctp_msg_etx_t)];
+		block_data_t buffer[HEADER_SIZE];
 
 	};
 

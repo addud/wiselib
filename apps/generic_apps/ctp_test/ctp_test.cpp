@@ -28,7 +28,7 @@ typedef wiselib::CtpRandomNumber<Os> RandomNumber;
 typedef wiselib::CtpLinkEstimator<Os, RoutingTable, RandomNumber, Radio> LinkEstimator;
 
 typedef wiselib::CtpRoutingEngine<Os, LinkEstimator, RoutingTable, RandomNumber,
-		Radio> RoutingEngine;
+		LinkEstimator> RoutingEngine;
 
 typedef wiselib::CtpForwardingEngineMsg<Os, Radio> DataMessage;
 typedef wiselib::CtpSendQueueValue<Radio, DataMessage> SendQueueValue;
@@ -51,11 +51,13 @@ public:
 
 		//TODO: Send random_number_ by value
 		le_.init(*radio_, *timer_, *debug_, *clock_, random_number_);
-		re_.init(*radio_, *timer_, *debug_, *clock_, random_number_, le_);
-		fe_.init(*radio_, *timer_, *debug_, *clock_, random_number_, re_);
 		le_.enable_radio();
+
+		re_.init(le_, *timer_, *debug_, *clock_, random_number_, le_);
 		re_.enable();
-//		fe_.enable_radio();
+
+		fe_.init(*radio_, *timer_, *debug_, *clock_, random_number_, re_);
+		fe_.enable_radio();
 
 		for (int i = 0; i < ROOT_NODES_NR; i++) {
 			if (radio_->id() == wiselib::nodes[wiselib::root_nodes[i]]) {
@@ -75,8 +77,12 @@ public:
 	// --------------------------------------------------------------------
 	void start(void*) {
 		block_data_t message[] = "caca\0";
+
+		//TODO: FiX: doesn't get back here after sending
+
+		fe_.send(Radio::BROADCAST_ADDRESS, sizeof(message), message);
+
 		debug_->debug("%d: APP sends message %s\n", radio_->id(), message);
-//		fe_.send(Radio::NULL_NODE_ID, sizeof(message), message);
 
 // following can be used for periodic messages to sink
 		timer_->set_timer < CtpTest, &CtpTest::start > (5000, this, 0);

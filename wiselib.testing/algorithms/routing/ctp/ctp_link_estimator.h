@@ -299,6 +299,7 @@ public:
 	// -----------------------------------------------------------------------
 
 	int send(node_id_t destination, size_t len, block_data_t *data) {
+//		debug().debug("LE sending from %d",radio().id());
 		return command_Send_send(destination, len, data);
 	}
 

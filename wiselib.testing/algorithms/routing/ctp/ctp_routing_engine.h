@@ -312,10 +312,6 @@ namespace wiselib {
 			route_found = (routeInfo.parent == INVALID_ADDR);
 			state_is_root = true;
 			routeInfo.parent = radio().id(); //myself
-
-			parent = routeInfo.parent;
-
-			debug().debug("My ID %d",routeInfo.parent);
 			routeInfo.etx = 0;
 			if (route_found) {
 				signal_Routing_routeFound();
@@ -399,8 +395,6 @@ namespace wiselib {
 		bool radioOn;
 		bool running;
 		bool justEvicted;
-
-		node_id_t parent;
 
 		RoutingTableValue routeInfo;
 		bool state_is_root;
@@ -501,9 +495,9 @@ namespace wiselib {
 					va_start(fmtargs, msg);
 					vsnprintf(buffer, sizeof(buffer) - 1, msg, fmtargs);
 					va_end(fmtargs);
-					debug().debug("%d: RE: ", radio().id());
+//					debug().debug("%d: RE: ", radio().id());
 					debug().debug(buffer);
-					debug().debug("\n");
+//					debug().debug("\n");
 					break;
 				}
 			}
@@ -519,7 +513,7 @@ namespace wiselib {
 		// ----------------------------------------------------------------------------------
 
 		void timer_elapsed(void *userdata) {
-			//TODO: make sure cast works - originally was cast to int
+
 			int timeout = (int) (userdata);
 
 			switch (timeout) {
@@ -640,8 +634,7 @@ namespace wiselib {
 			debug().debug("evaluateEtx - %d -> %d\n", (int) quality,
 				(int) (quality + 10));
 #endif
-//			return (quality + 10);
-			return 1;
+			return (quality + 10);
 		}
 
 		// ----------------------------------------------------------------------------------
@@ -849,23 +842,18 @@ namespace wiselib {
 
 			beaconMsg.set_options(0);
 
-			echo("1");
 			/* Check congestion state */
 			if (congested_state) {
 				beaconMsg.set_congestion();
 			}
-			echo("2");
 			beaconMsg.set_parent(routeInfo.parent);
-			echo("-----------------node ID %d, parent %d",parent,routeInfo.parent);
+
 			if (state_is_root) {
-				echo("3");
 				beaconMsg.set_etx(routeInfo.etx);
 			} else if (routeInfo.parent == INVALID_ADDR) {
-				echo("4");
 				beaconMsg.set_etx(routeInfo.etx);
 				beaconMsg.set_pull();
 			} else {
-				echo("5");
 				beaconMsg.set_etx(
 					routeInfo.etx
 					+ evaluateEtx(
@@ -873,7 +861,6 @@ namespace wiselib {
 					routeInfo.parent)));
 			}
 
-			echo("6");
 #ifdef ROUTING_ENGINE_DEBUG
 			debug().debug("%d: ", self);
 			debug().debug("sendBeaconTask - parent: %d etx: \n",
@@ -884,12 +871,11 @@ namespace wiselib {
 			//we need to clone the message, otherwise we get memory errors
 			RoutingMessage dup=beaconMsg;
 
-			echo("beacon sent - parent: %d etx: %d", beaconMsg.parent(), beaconMsg.etx());
+//			echo("beacon sent - parent: %d etx: %d", beaconMsg.parent(), beaconMsg.etx());
 
 			radio().send(Radio::BROADCAST_ADDRESS, RoutingMessage::HEADER_SIZE,
 				reinterpret_cast<block_data_t*>(&dup));
 
-			echo("7");
 		}
 
 		// ----------------------------------------------------------------------------------

@@ -40,7 +40,7 @@
 
 #define NODES_NR												8
 //#define NODES														{410,411,412,413,414,415,416,417} //tubs isense ids
-#define NODES														{418,419,420,421,422,424,466,427} // alternate tubs isense ids
+#define NODES														{418,419,420,421,422,424,426,427} // alternate tubs isense ids
 //#define NODES														{0,1,2,3,4,5,6,7} //Shawn ids
 
 
@@ -54,10 +54,8 @@
 #define ROOT_NODES 											{6}
 
 //Node indexes we want to print debug messages on
-//#define DEBUG_NODES										{0,1,2,3,4,5,6,7}
-//#define DEBUG_NODES_NR 									8
-#define DEBUG_NODES										{7}
-#define DEBUG_NODES_NR 									1
+#define DEBUG_NODES										{0,1,2,3,4,5,6,7}
+#define DEBUG_NODES_NR 									8
 
 namespace wiselib {
 

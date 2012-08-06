@@ -389,9 +389,9 @@ namespace wiselib {
 					va_start(fmtargs, msg);
 					vsnprintf(buffer, sizeof(buffer) - 1, msg, fmtargs);
 					va_end(fmtargs);
-					debug().debug("%d: FE: ", id());
+//					debug().debug("%d: FE: ", id());
 					debug().debug(buffer);
-					debug().debug("\n");
+//					debug().debug("\n");
 					break;
 				}
 			}
@@ -514,7 +514,7 @@ namespace wiselib {
 				return;
 			}
 
-			echo("Received msg %s from %d",msg->payload(),from);
+			debug_->debug("Received msg %s from %d",msg->payload(),from);
 
 			bool duplicate = false;
 			fe_queue_entry_t* qe;
@@ -747,10 +747,9 @@ namespace wiselib {
 					qe->msg->clear_congestion();
 				}
 
-				//TODO: Send message to the RE
 				subsendResult = radio().send(dest, qe->len, reinterpret_cast<block_data_t*>(qe->msg));
 
-				echo("Sending to %d",dest);
+				echo("Sending to %d with ETX %d",dest,gradient);
 
 				//TODO: Implement callback to send_done event from RE
 				event_SubSend_sendDone(qe->msg, subsendResult);
