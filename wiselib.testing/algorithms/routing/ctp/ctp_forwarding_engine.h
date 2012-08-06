@@ -216,7 +216,7 @@ namespace wiselib {
 		// ----------------------------------------------------------------------------------
 
 		template<class T, void (T::*TMethod)(uint8_t)>
-		uint8_t reg_event_callback(T *obj_pnt) {
+		uint8_t reg_event_callbfack(T *obj_pnt) {
 
 			if (event_callbacks_.empty())
 				event_callbacks_.assign(RE_MAX_EVENT_RECEIVERS, event_delegate_t());
@@ -514,6 +514,8 @@ namespace wiselib {
 				return;
 			}
 
+			echo("Received msg %s from %d",msg->payload(),from);
+
 			bool duplicate = false;
 			fe_queue_entry_t* qe;
 			uint8_t i, thl;
@@ -723,10 +725,7 @@ namespace wiselib {
 					echo("sendTask - I'm root, so loopback and signal receive.");
 
 					// TODO: Forward the packet to the application layer
-					//				cPacket* dupMsg = qe->msg->dup();
-					//				toApplicationLayer(dupMsg->decapsulate()); // dup because it's a loopback message, it must be deleted in event_SubSend_sendDone
-					//
-					//				event_SubSend_sendDone(cc2420control, SUCCESS);
+
 					return;
 				}
 
