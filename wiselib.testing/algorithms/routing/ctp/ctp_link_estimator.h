@@ -29,7 +29,7 @@
 #include "algorithms/routing/ctp/ctp_types.h"
 #include "algorithms/routing/ctp/ctp_debugging.h"
 
-#define LE_MAX_EVENT_RECEIVERS	2
+#define LE_MAX_EVENT_RECEIVERS		2
 #define NEIGHBOR_TABLE_SIZE			10
 
 namespace wiselib {
@@ -471,7 +471,7 @@ public:
 	// slap the header and footer before sending the message
 	error_t command_Send_send(node_id_t addr, size_t size, block_data_t* pkt) {
 
-		LinkEstimatorMsg lePkt; // initialize the LinkEstimator packet
+		LinkEstimatorMsg lePkt(CtpLinkEstimatorMsgId); // initialize the LinkEstimator packet
 
 		// add the header and dynamically adds the size of the footer. Note that actually there is no footer but just a bigger header.
 		if (addLinkEstHeaderAndFooter(&lePkt, size) != SUCCESS) {
@@ -550,11 +550,11 @@ private:
 		int i;
 		for (i = 0; i < DEBUG_NODES_NR; i++) {
 
-			if (id() == nodes[debug_nodes[i]]) {
+			if (radio().id() == nodes[debug_nodes[i]]) {
 				va_start(fmtargs, msg);
 				vsnprintf(buffer, sizeof(buffer) - 1, msg, fmtargs);
 				va_end(fmtargs);
-				debug().debug("%d: LE: ", id());
+				debug().debug("%d: LE: ", radio().id());
 				debug().debug(buffer);
 				debug().debug("\n");
 				break;
@@ -583,6 +583,11 @@ private:
 #endif
 
 		LinkEstimatorMsg* msg = reinterpret_cast<LinkEstimatorMsg*>(data);
+
+		if (msg->msg_id() != CtpLinkEstimatorMsgId) {
+			return;
+		}
+
 		processReceivedMessage(from, len, msg);
 		notify_receivers(from, len - LinkEstimatorMsg::HEADER_SIZE - msg->ne() * sizeof(neighbor_stat_entry), msg->payload());
 	}

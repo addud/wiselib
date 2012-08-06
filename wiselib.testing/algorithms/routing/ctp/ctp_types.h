@@ -34,6 +34,13 @@ namespace wiselib
 
    typedef int error_t;
 
+   enum CtpMsgIds
+   {
+      CtpDataMsgId					= 137, ///< Msg type for data messages (from FE)
+      CtpRoutingMsgId				= 138, ///< Msg type for routing beacons (from RE)
+      CtpLinkEstimatorMsgId			= 139  ///< Msg type for link estimator messages (from LE)
+   };
+
 }
 
 

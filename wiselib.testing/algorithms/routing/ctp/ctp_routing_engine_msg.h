@@ -39,18 +39,30 @@ namespace wiselib {
 
 		// --------------------------------------------------------------------
 
-		inline CtpRoutingEngineMsg(
-			ctp_msg_options_t options, node_id_t parent, ctp_msg_etx_t etx) {
-				set_options(options);
-				set_parent(parent);
-				set_etx(etx);
-		}
+		enum HeaderSize {
+			HEADER_SIZE = sizeof(message_id_t) +sizeof(ctp_msg_options_t)
+			+ sizeof(node_id_t) + sizeof(ctp_msg_etx_t)
+		};
 
 		// --------------------------------------------------------------------
 
-		inline CtpRoutingEngineMsg(){
+		inline CtpRoutingEngineMsg() {
 		}
 
+		inline CtpRoutingEngineMsg(message_id_t id) {
+			set_msg_id(id);
+		}
+
+		// --------------------------------------------------------------------
+		message_id_t msg_id() {
+			return read<OsModel, block_data_t, message_id_t>(
+				buffer + ID_POS);
+		}
+		// --------------------------------------------------------------------
+		void set_msg_id(message_id_t id) {
+			write<OsModel, block_data_t, message_id_t>(buffer + ID_POS,
+				id);
+		}
 		// --------------------------------------------------------------------
 		ctp_msg_options_t options() {
 			return read<OsModel, block_data_t, ctp_msg_options_t>(
@@ -111,15 +123,11 @@ namespace wiselib {
 		void set_etx(ctp_msg_etx_t etx) {
 			write<OsModel, block_data_t, ctp_msg_etx_t>(buffer + ETX_POS, etx);
 		}
-		// --------------------------------------------------------------------
-		size_t buffer_size() {
-			return sizeof(ctp_msg_options_t) + sizeof(node_id_t)
-				+ sizeof(ctp_msg_etx_t);
-		}
 
 	private:
 		enum data_positions {
-			OPTIONS_POS = 0,
+			ID_POS=0,
+			OPTIONS_POS = ID_POS+sizeof(message_id_t),
 			PARENT_POS = OPTIONS_POS + sizeof(ctp_msg_options_t),
 			ETX_POS = PARENT_POS + sizeof(node_id_t)
 		};
