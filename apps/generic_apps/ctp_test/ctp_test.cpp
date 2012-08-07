@@ -6,6 +6,7 @@
 #include "algorithms/routing/ctp/ctp_forwarding_engine.h"
 #include "algorithms/routing/ctp/ctp_link_estimator.h"
 #include "algorithms/routing/ctp/ctp_routing_table_value.h"
+#include "algorithms/routing/ctp/ctp_neighbour_table_value.h"
 #include "algorithms/routing/ctp/ctp_random_number.h"
 #include "algorithms/routing/ctp/ctp_debugging.h"
 #include "algorithms/routing/ctp/ctp_send_queue_value.h"
@@ -25,7 +26,10 @@ typedef wiselib::CtpRoutingTableValue<Radio> RoutingTableValue;
 typedef wiselib::StaticArrayRoutingTable<Os, Radio, 10, RoutingTableValue> RoutingTable;
 typedef wiselib::CtpRandomNumber<Os> RandomNumber;
 
-typedef wiselib::CtpLinkEstimator<Os, RoutingTable, RandomNumber, Radio> LinkEstimator;
+
+typedef wiselib::CtpNeighbourTableValue<Radio>NeighbourTableValue;
+typedef wiselib::StaticArrayRoutingTable<Os, Radio, 10, NeighbourTableValue> NeighbourTable;
+typedef wiselib::CtpLinkEstimator<Os, NeighbourTable, RandomNumber, Radio> LinkEstimator;
 
 typedef wiselib::CtpRoutingEngine<Os, LinkEstimator, RoutingTable, RandomNumber,
 		LinkEstimator> RoutingEngine;
@@ -33,9 +37,12 @@ typedef wiselib::CtpRoutingEngine<Os, LinkEstimator, RoutingTable, RandomNumber,
 typedef wiselib::CtpForwardingEngineMsg<Os, Radio> DataMessage;
 typedef wiselib::CtpSendQueueValue<Radio, DataMessage> SendQueueValue;
 typedef wiselib::queue_static<Os, SendQueueValue*, 13> SendQueue;
+typedef wiselib::queue_static<Os, SendQueueValue, 13> EntryPool;
+typedef wiselib::queue_static<Os, DataMessage, 13> MessagePool;
+//TODO: Check sentCache for pointers to local variables
 typedef wiselib::vector_static<Os, DataMessage*, 4> SentCache;
 typedef wiselib::CtpForwardingEngine<Os, DataMessage, SendQueueValue, SendQueue,
-		SentCache, RandomNumber, RoutingEngine, Radio> ForwardingEngine;
+		EntryPool, MessagePool, SentCache, RandomNumber, RoutingEngine, Radio> ForwardingEngine;
 
 class CtpTest {
 
@@ -68,7 +75,7 @@ public:
 
 		debug_->debug("Node %d started", radio_->id());
 
-//		fe_.reg_recv_callback<CtpTest, &CtpTest::receive_radio_message>(this);
+		fe_.reg_recv_callback<CtpTest, &CtpTest::receive_radio_message>(this);
 
 		if (radio_->id() == wiselib::nodes[3]) {
 			timer_->set_timer<CtpTest, &CtpTest::start>(12000, this, 0);
@@ -80,9 +87,9 @@ public:
 
 		//TODO: FiX: doesn't get back here after sending
 
-		fe_.send(Radio::BROADCAST_ADDRESS, sizeof(message), message);
-
 		debug_->debug("%d: APP sends message %s\n", radio_->id(), message);
+
+		fe_.send(Radio::BROADCAST_ADDRESS, sizeof(message), message);
 
 // following can be used for periodic messages to sink
 		timer_->set_timer < CtpTest, &CtpTest::start > (5000, this, 0);

@@ -46,6 +46,11 @@ namespace wiselib {
 
 		// --------------------------------------------------------------------
 
+		inline CtpForwardingEngineMsg() {
+		}
+
+		// --------------------------------------------------------------------
+
 		inline CtpForwardingEngineMsg(message_id_t id) {
 			set_msg_id(id);
 		}

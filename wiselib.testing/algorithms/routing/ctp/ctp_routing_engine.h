@@ -495,9 +495,9 @@ namespace wiselib {
 					va_start(fmtargs, msg);
 					vsnprintf(buffer, sizeof(buffer) - 1, msg, fmtargs);
 					va_end(fmtargs);
-//					debug().debug("%d: RE: ", radio().id());
+					debug().debug("%d: RE: ", radio().id());
 					debug().debug(buffer);
-//					debug().debug("\n");
+					debug().debug("\n");
 					break;
 				}
 			}

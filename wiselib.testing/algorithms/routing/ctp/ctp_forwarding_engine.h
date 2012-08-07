@@ -35,7 +35,7 @@
 namespace wiselib {
 
 	template<typename OsModel_P, typename DataMessage_P, typename SendQueueValue_P, typename SendQueue_P,
-		typename SentCache_P, typename RandomNumber_P, typename RoutingEngine_P,
+		typename EntryPool_P, typename MessagePool_P, typename SentCache_P, typename RandomNumber_P, typename RoutingEngine_P,
 		typename Radio_P = typename OsModel_P::Radio,
 		typename Timer_P = typename OsModel_P::Timer,
 		typename Debug_P = typename OsModel_P::Debug,
@@ -46,6 +46,8 @@ namespace wiselib {
 		typedef DataMessage_P DataMessage;
 		typedef SendQueueValue_P SendQueueValue;
 		typedef SendQueue_P SendQueue;
+		typedef EntryPool_P EntryPool;
+		typedef MessagePool_P MessagePool;
 		typedef SentCache_P SentCache;
 		typedef RandomNumber_P RandomNumber;
 		typedef RoutingEngine_P RoutingEngine;
@@ -66,7 +68,7 @@ namespace wiselib {
 		typedef SendQueueValue fe_queue_entry_t;
 		typedef typename SentCache::iterator SentCacheIterator;
 
-		typedef CtpForwardingEngine<OsModel, DataMessage,SendQueueValue, SendQueue, SentCache,
+		typedef CtpForwardingEngine<OsModel, DataMessage,SendQueueValue, SendQueue,EntryPool,MessagePool, SentCache,
 			RandomNumber, RoutingEngine, Radio, Timer, Debug> self_type;
 		typedef self_type* self_pointer_t;
 
@@ -289,16 +291,20 @@ namespace wiselib {
 		fe_queue_entry_t clientEntries;
 		fe_queue_entry_t* clientPtrs;
 
-		// Needed for SendQueue Interface.
+		//queue of pointers to messages to be sent
 		SendQueue sendqueue;
+		
+		//pool of preallocated containers for sendqueue entries
+		EntryPool entrypool_;
+		//pool of preallocated containers for data messages
+		MessagePool msgpool_;
 
 		// Required by our implementation of timers.
 		bool congestionTimerIsRunning;
 		bool reTxTimerIsRunning;
 
-		//	// Needed for SentCache Interface.
+		//Holds the last few sent messages for quicker loop detection
 		SentCache sentCache;
-		int sentCacheSize;
 
 		typename RoutingEngine::self_pointer_t cre;
 
@@ -333,6 +339,10 @@ namespace wiselib {
 		// ----------------------------------------------------------------------------------
 
 		void init_variables(void) {
+			fe_queue_entry_t dummy_entry;
+			DataMessage dummy_msg(CtpDataMsgId);
+
+
 			self = radio().id();
 
 			//TODO: Pass configuration values as template parameter
@@ -341,8 +351,6 @@ namespace wiselib {
 			// to true when the timer is launched and to false when it fires.
 			congestionTimerIsRunning = false;
 			reTxTimerIsRunning = false;
-
-			sentCacheSize = 4; //messages
 
 			parentCongested = false;
 			running = false;
@@ -355,6 +363,15 @@ namespace wiselib {
 			lastParent = NULL_NODE_ID; //last parent we sent to
 			seqno = 0;
 
+			//preallocate memory for the send queue entries
+			while (!entrypool_.full()) {
+				entrypool_.push(dummy_entry);
+			}
+
+			//preallocate memory for the messages
+			while (!msgpool_.full()) {
+				msgpool_.push(dummy_msg);
+			}
 		}
 
 		// --------------------------------------------------------------------
@@ -389,9 +406,9 @@ namespace wiselib {
 					va_start(fmtargs, msg);
 					vsnprintf(buffer, sizeof(buffer) - 1, msg, fmtargs);
 					va_end(fmtargs);
-//					debug().debug("%d: FE: ", id());
+					debug().debug("%d: FE: ", id());
 					debug().debug(buffer);
-//					debug().debug("\n");
+					debug().debug("\n");
 					break;
 				}
 			}
@@ -458,14 +475,28 @@ namespace wiselib {
 		* put it on the send queue.
 		*/
 		void forward(size_t len, DataMessage* msg) {
-			fe_queue_entry_t qe;
+			fe_queue_entry_t *qe;
 			uint16_t gradient;
+			DataMessage* poolMsg;
 
-			qe.msg = msg;
-			qe.retries = MAX_RETRIES;
-			qe.len=len;
+			if (entrypool_.empty()) {
+				echo("Can't forward. Entry pool empty.");
+				return;
+			}
 
-			if (command_SendQueue_enqueue(&qe) == SUCCESS) {
+			qe=&entrypool_.front();
+
+			poolMsg = &msgpool_.front();
+
+			memcpy(poolMsg,msg,sizeof(DataMessage));
+			
+			
+
+			qe->msg = poolMsg;
+			qe->retries = MAX_RETRIES;
+			qe->len=len;
+
+			if (command_SendQueue_enqueue(qe) == SUCCESS) {
 
 				// Loop-detection code:
 				if (cre->command_CtpInfo_getEtx(&gradient) == SUCCESS) {
@@ -484,7 +515,7 @@ namespace wiselib {
 				if (!reTxTimerIsRunning) {
 					// sendTask is only immediately posted if we don't detect a
 					// loop.
-					sendTask();
+					post_sendTask();
 				}
 
 				// Successful function exit point:
@@ -514,7 +545,7 @@ namespace wiselib {
 				return;
 			}
 
-			debug_->debug("Received msg %s from %d",msg->payload(),from);
+			//echo("Received msg %s from %d",msg->payload(),from);
 
 			bool duplicate = false;
 			fe_queue_entry_t* qe;
@@ -575,11 +606,11 @@ namespace wiselib {
 
 		void event_RetxmitTimer_fired() {
 			sending = false;
-			sendTask();
+			post_sendTask();
 		}
 
 		void event_CongestionTimer_fired() {
-			sendTask();
+			post_sendTask();
 		}
 
 		// A simple predicate for now to determine congestion state of this node.
@@ -625,6 +656,7 @@ namespace wiselib {
 
 		error_t command_Send_send(size_t len, block_data_t* pkt) {
 			fe_queue_entry_t* qe;
+			DataMessage* msg;
 
 			if (!running) {
 				return ERR_NOTIMPL;
@@ -634,27 +666,35 @@ namespace wiselib {
 				return ERR_NOTIMPL;
 			}
 
-			DataMessage msg(CtpDataMsgId);
-			msg.set_options(0);
-			msg.set_pull();
-			msg.set_origin(self);
-			msg.set_seqno(seqno++);
-			msg.set_thl(0);
-			msg.set_payload(pkt,len);
-
-			if (clientPtrs == NULL) {
-				echo("Send.send - send failed as client is busy.");
+			if (entrypool_.empty()) {
+				echo("Can't send. Entry pool empty.");
 				return ERR_BUSY;
 			}
 
-			qe = clientPtrs;
-			qe->msg = &msg;
+			if (msgpool_.empty()) {
+				echo("Can't send. Message pool empty.");
+				return ERR_BUSY;
+			}
+
+			msg = &msgpool_.front();
+			msg->set_msg_id(CtpDataMsgId);
+			msg->set_options(0);
+			msg->set_pull();
+			msg->set_origin(self);
+			msg->set_seqno(seqno++);
+			msg->set_thl(0);
+			msg->set_payload(pkt,len);
+
+
+
+			qe = &entrypool_.front();
+			qe->msg = msg;
 			qe->len = len + DataMessage::HEADER_SIZE;
 			qe->retries = MAX_RETRIES;
 
 			if (command_SendQueue_enqueue(qe) == SUCCESS) {
 				if (radioOn && !reTxTimerIsRunning) {
-					sendTask();
+					post_sendTask();
 				}
 				clientPtrs = NULL;
 				return SUCCESS;
@@ -703,6 +743,7 @@ namespace wiselib {
 				// Once we are here, we have decided to send the packet.
 				if (command_SentCache_lookup(qe->msg)) { // NOT CHECKED
 					command_SendQueue_dequeue();
+					echo("sendTask: Message found in the sent cache");
 					//We must post the task instead of calling it directly
 					//to avoid infinite recursion
 					post_sendTask();
@@ -718,13 +759,10 @@ namespace wiselib {
 				}
 
 				if (cre->command_RootControl_isRoot()) { // CHECK -> OK: loppbacked message to app layer.
-					// there is a collectionid (needed for signal receive) that is useless in our implementation: it has been removed.
-					// here there is a memcpy for loopbackMsgPtr that we don't need to implement, we use msg->dup() instead later.
+
 					ackPending = false;
 
 					echo("sendTask - I'm root, so loopback and signal receive.");
-
-					// TODO: Forward the packet to the application layer
 
 					return;
 				}
@@ -801,7 +839,6 @@ namespace wiselib {
 				echo("queue is empty");
 			}
 			fe_queue_entry_t *qe = command_SendQueue_head();
-
 			if (qe == NULL /*|| qe->msg != msg*/) { // cannot check the pointer since I dup the message
 				echo("BUG: this should never happen");
 			} else if (error != SUCCESS) { // NOT CHECKED
@@ -831,14 +868,13 @@ namespace wiselib {
 						startRetxmitTimer(SENDDONE_OK_WINDOW, SENDDONE_OK_OFFSET);
 					}
 			} else { // CHECK -> OK: packet successfully txmitted and removed from queue.
-				// there was a pointer to header that was never used... i have removed it.
 
 				//TODO: Enable acking when implemented
 				//			le->command_LinkEstimator_txAck(command_AMPacket_destination(msg));
-				clientPtrs = qe;
 				command_SentCache_insert(qe->msg);
 				command_SendQueue_dequeue();
 				sending = false;
+
 				startRetxmitTimer(SENDDONE_OK_WINDOW, SENDDONE_OK_OFFSET);
 			}
 		}
@@ -862,6 +898,8 @@ namespace wiselib {
 		error_t command_SendQueue_enqueue(fe_queue_entry_t* qe) {
 			if (!sendqueue.full()) {
 				sendqueue.push(qe);
+				entrypool_.pop();
+				msgpool_.pop();
 				cre->command_updateCongestedState(command_CtpCongestion_isCongested());
 				return SUCCESS;
 			} else
@@ -875,6 +913,8 @@ namespace wiselib {
 		fe_queue_entry_t* command_SendQueue_dequeue() {
 			fe_queue_entry_t* ptr = sendqueue.front();
 			sendqueue.pop();
+			entrypool_.push(*ptr);
+			msgpool_.push(*(ptr->msg));
 			cre->command_updateCongestedState(command_CtpCongestion_isCongested());
 			return ptr;
 		}
@@ -913,7 +953,8 @@ namespace wiselib {
 		// ------------------------------------------------------------------------
 
 		void command_SentCache_insert(DataMessage* pkt) {
-			if ((uint8_t) sentCache.size() == sentCacheSize) { // remove the oldest element
+			if (sentCache.size() == sentCache.max_size()) { 
+				// remove the oldest element
 				SentCacheIterator eraseLocation = sentCache.begin();
 				sentCache.erase(eraseLocation);
 			}
@@ -929,11 +970,6 @@ namespace wiselib {
 			}
 			return false;
 		}
-
-		void command_SentCache_flush() {
-			sentCache.clear();
-		}
-
 	}
 	;
 

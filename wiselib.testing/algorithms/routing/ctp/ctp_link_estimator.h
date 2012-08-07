@@ -29,12 +29,15 @@
 #include "algorithms/routing/ctp/ctp_types.h"
 #include "algorithms/routing/ctp/ctp_debugging.h"
 
+#include "internal_interface/routing_table/routing_table_static_array.h"
+#include "algorithms/routing/ctp/ctp_neighbour_table_value.h"
+
 #define LE_MAX_EVENT_RECEIVERS		2
 #define NEIGHBOR_TABLE_SIZE			10
 
 namespace wiselib {
 
-template<typename OsModel_P, typename RoutingTable_P, typename RandomNumber_P,
+template<typename OsModel_P, typename NeighbourTable_P, typename RandomNumber_P,
 		typename Radio_P = typename OsModel_P::Radio,
 		typename Timer_P = typename OsModel_P::Timer,
 		typename Debug_P = typename OsModel_P::Debug,
@@ -43,18 +46,21 @@ class CtpLinkEstimator: public RoutingBase<OsModel_P, Radio_P> {
 public:
 	typedef OsModel_P OsModel;
 	typedef RandomNumber_P RandomNumber;
-	typedef RoutingTable_P RoutingTable;
+	//typedef NeighbourTable_P NeighbourTable;
 	typedef Radio_P Radio;
 	typedef Timer_P Timer;
 	typedef Debug_P Debug;
 	typedef typename OsModel::Clock Clock;
 
-	typedef CtpLinkEstimator<OsModel, RoutingTable, RandomNumber, Radio, Timer,
+	typedef CtpLinkEstimator<OsModel, NeighbourTable_P, RandomNumber, Radio, Timer,
 			Debug, Clock> self_type;
 	typedef self_type* self_pointer_t;
 
-	typedef typename RoutingTable::mapped_type RoutingTableValue;
-	typedef typename RoutingTable::iterator RoutingTableIterator;
+	/*
+	typedef typename NeighbourTable::mapped_type NeighbourTableValue;
+	typedef NeighbourTableValue neighbor_table_entry_t;
+	typedef typename NeighbourTable::iterator NeighbourTableIterator;
+	*/
 
 	typedef typename Radio::node_id_t node_id_t;
 	typedef typename Radio::size_t size_t;
@@ -80,40 +86,12 @@ public:
 
 	typedef CtpLinkEstimatorMsg<OsModel, Radio, sizeof(neighbor_stat_entry_t)> LinkEstimatorMsg;
 
+	typedef CtpNeighbourTableValue<Radio> NeighbourTableValue;
+	typedef StaticArrayRoutingTable<OsModel, Radio, 10, NeighbourTableValue> NeighbourTable;
+	typedef typename NeighbourTable::iterator NeighbourTableIterator;
+
+
 	// --------------------------------------------------------------------
-
-	// neighbor table entry
-	typedef struct neighbor_table_entry {
-		// link layer address of the neighbor
-		node_id_t ll_addr;
-		// last beacon sequence number received from this neighbor
-		uint8_t lastseq;
-		// number of beacons received after last beacon estimator update
-		// the update happens every BLQ_PKT_WINDOW beacon packets
-		uint8_t rcvcnt;
-		// number of beacon packets missed after last beacon estimator update
-		uint8_t failcnt;
-		// flags to describe the state of this entry
-		uint8_t flags;
-		// MAXAGE-inage gives the number of update rounds we haven't been able
-		// update the inbound beacon estimator
-		uint8_t inage;
-		// inbound qualities in the range [1..255]
-		// 1 bad, 255 good
-		uint8_t inquality;
-		// EETX for the link to this neighbor. This is the quality returned to
-		// the users of the link estimator
-		uint16_t eetx;
-		// Number of data packets successfully sent (ack'd) to this neighbor
-		// since the last data estimator update round. This update happens
-		// every DLQ_PKT_WINDOW data packets
-		uint8_t data_success;
-		// The total number of data packets transmission attempt to this neighbor
-		// since the last data estimator update round.
-		uint8_t data_total;
-	} neighbor_table_entry_t;
-
-	// ----------------------------------------------------------------------------------
 
 	enum ErrorCodes {
 		SUCCESS = OsModel::SUCCESS,
@@ -145,32 +123,12 @@ public:
 
 	// --------------------------------------------------------------------
 
-	// the NEIGHBOR_TABLE_SIZE = 10 has been removed since it is defined through omnetpp.ini
-
 	// Masks for the flag field in the link estimation header
 	enum {
 		// use last four bits to keep track of
 		// how many footer entries there are
 		NUM_ENTRIES_FLAG = 15
 	};
-
-	// link estimator header added to
-	// every message passing through the link estimator
-	// linkest_header_t removed: fields are accessible through cPacket methods.
-
-	// neighbor_stat_entry has been moved in the CtpNoePackets.msg packet definition. Consequently, also the linkest_footer is useless.
-
-	// for outgoing link estimator message
-	// so that we can compute bi-directional quality
-	//typedef struct neighbor_stat_entry {
-	//  am_addr_t ll_addr;
-	//  uint8_t inquality;
-	//} neighbor_stat_entry_t;
-
-	// we put the above neighbor entry in the footer
-	//typedef struct linkest_footer {
-	//  neighbor_stat_entry_t neighborList[1];
-	//} linkest_footer_t;
 
 	// Flags for the neighbor table entry
 	enum NeighbourTableEntryType {
@@ -197,8 +155,6 @@ public:
 		// number by this gap, we reinitialize the link
 		MAX_PKT_GAP = 10,
 		BEST_EETX = 0,
-		INVALID_RVAL = 0xff,
-		INVALID_NEIGHBOR_ADDR = 0xff,
 		// if we don't know the link quality, we need to return a value so
 		// large that it will not be used to form paths
 		VERY_LARGE_EETX_VALUE = 0xff,
@@ -220,16 +176,18 @@ public:
 	// -----------------------------------------------------------------------
 	// keep information about links from the neighbors
 
-	neighbor_table_entry_t NeighborTable[NEIGHBOR_TABLE_SIZE];
 	// link estimation sequence, increment every time a beacon is sent
 	uint8_t linkEstSeq;
-	// if there is not enough room in the packet to put all the neighbor table
+	// if there is not enough room in the packet to put all the neighbour table
 	// entries, in order to do round robin we need to remember which entry
 	// we sent in the last beacon
 	uint8_t prevSentIdx;
 
 	// Node id
 	node_id_t self;
+
+	/* Neighbour table -- info about link to the neighbours */
+	NeighbourTable nt;
 
 	// -----------------------------------------------------------------------
 
@@ -356,21 +314,21 @@ public:
 
 	// ----------------------------------------------------------------------------------
 
-	/*
-	 * LinkEstimator Interface -------------------------------------------------------------
-	 */
-	// return bi-directional link quality to the neighbor
-	uint16_t command_LinkEstimator_getLinkQuality(node_id_t neighbor) {
-		uint8_t idx;
-		idx = findIdx(neighbor);
-		if (idx == INVALID_RVAL) {
+	// return bi-directional link quality to the neighbour
+	uint16_t command_LinkEstimator_getLinkQuality(node_id_t neighbour) {
+
+		NeighbourTableIterator it;
+		it = nt.find(neighbour);
+
+		if (it == nt.end()) {
 			return VERY_LARGE_EETX_VALUE;
 		} else {
-			if (NeighborTable[idx].flags & MATURE_ENTRY) {
-				return NeighborTable[idx].eetx;
+			if (it->second.flags & MATURE_ENTRY) {
+				return it->second.eetx;
 			} else {
 				return VERY_LARGE_EETX_VALUE;
 			}
+			
 		}
 	}
 
@@ -379,34 +337,35 @@ public:
 	// insert the neighbor at any cost (if there is a room for it)
 	// even if eviction of a perfectly fine neighbor is called for
 	error_t command_LinkEstimator_insertNeighbor(node_id_t neighbor) {
-		uint8_t nidx;
-//		echo("forced insert of %d", neighbor);
-		nidx = findIdx(neighbor);
-		if (nidx != INVALID_RVAL) {
-#ifdef LINK_ESTIMATOR_DEBUG
-			echo("insert: Found the entry, no need to insert");
-#endif
+		NeighbourTableIterator it;
+
+		it = nt.find(neighbor);
+
+
+		if (it != nt.end()) {
 			return SUCCESS;
 		}
 
-		nidx = findEmptyNeighborIdx();
-		if (nidx != INVALID_RVAL) {
-#ifdef LINK_ESTIMATOR_DEBUG
-			echo("insert: inserted into the empty slot");
-#endif
-			initNeighborIdx(nidx, neighbor);
+		if (nt.size()!=nt.max_size()) {
+
+			initNeighbourValue(&nt[neighbor]);
 			return SUCCESS;
+
 		} else {
-			nidx = findWorstNeighborIdx(BEST_EETX);
-			if (nidx != INVALID_RVAL) {
-#ifdef LINK_ESTIMATOR_DEBUG
-				echo("insert: inserted by replacing an entry for neighbor: %d",(int)NeighborTable[nidx].ll_addr);
-#endif
-				signal_LinkEstimator_evicted(NeighborTable[nidx].ll_addr);
-				initNeighborIdx(nidx, neighbor);
-				return SUCCESS;
+			it = findWorstNeighbour(BEST_EETX);
+
+			if (it!=nt.end()) {
+
+			signal_LinkEstimator_evicted(it->first);
+			
+			it->first=neighbor;
+			initNeighbourValue(&it->second);
+			
+
+			return SUCCESS;
 			}
 		}
+
 		return ERR_BUSY;
 	}
 
@@ -414,24 +373,31 @@ public:
 
 	// pin a neighbor so that it does not get evicted
 	error_t command_LinkEstimator_pinNeighbor(node_id_t neighbor) {
-		uint8_t nidx = findIdx(neighbor);
-		if (nidx == INVALID_RVAL) {
+		NeighbourTableIterator it;
+
+		it=nt.find(neighbor);
+
+		if (it!=nt.end()) {
 			return ERR_UNSPEC;
 		}
-		NeighborTable[nidx].flags |= PINNED_ENTRY;
+
+		it->second.flags |= PINNED_ENTRY;
 //		echo("pinned %d", (int) neighbor);
 		return SUCCESS;
 	}
 
 	// -----------------------------------------------------------------------
 
-	// pin a neighbor so that it does not get evicted
 	error_t command_LinkEstimator_unpinNeighbor(node_id_t neighbor) {
-		uint8_t nidx = findIdx(neighbor);
-		if (nidx == INVALID_RVAL) {
+		NeighbourTableIterator it;
+
+		it=nt.find(neighbor);
+
+		if (it!=nt.end()) {
 			return ERR_UNSPEC;
 		}
-		NeighborTable[nidx].flags &= ~PINNED_ENTRY;
+
+		it->second.flags &= ~PINNED_ENTRY;
 //		echo("unpinned %d", (int) neighbor);
 		return SUCCESS;
 	}
@@ -440,14 +406,18 @@ public:
 
 	// called by the RE as a feedback to the signal_CompareBit_shouldInsert event
 	error_t command_LinkEstimator_forceInsertNeighbor(node_id_t neighbor) {
-		uint8_t nidx;
+		NeighbourTableIterator it;
 
-		nidx = findRandomNeighborIdx();
-		if (nidx == INVALID_RVAL) {
+		it = findRandomNeighbour();
+
+		if (it!=nt.end()) {
 			return ERR_UNSPEC;
 		}
-		signal_LinkEstimator_evicted(NeighborTable[nidx].ll_addr);
-		initNeighborIdx(nidx, neighbor);
+
+		signal_LinkEstimator_evicted(it->first);
+
+		initNeighbourValue(&it->second);
+
 		return SUCCESS;
 	}
 
@@ -455,14 +425,17 @@ public:
 
 	// called when the parent changes; clear state about data-driven link quality
 	error_t command_LinkEstimator_clearDLQ(node_id_t neighbor) {
-		neighbor_table_entry_t *ne;
-		uint8_t nidx = findIdx(neighbor);
-		if (nidx == INVALID_RVAL) {
+		NeighbourTableIterator it;
+
+		it=nt.find(neighbor);
+
+		if (it!=nt.end()) {
 			return ERR_UNSPEC;
 		}
-		ne = &NeighborTable[nidx];
-		ne->data_total = 0;
-		ne->data_success = 0;
+
+		it->second.data_total = 0;
+		it->second.data_success=0;
+
 		return SUCCESS;
 	}
 
@@ -532,15 +505,8 @@ private:
 		//Id of the node (like TOS_NODE_ID)
 		self = radio().id();
 
-
-
-		//TODO: Replace neighbor table
-//		NEIGHBOR_TABLE_SIZE = 10;
-//		NeighborTable = new neighbor_table_entry_t[NEIGHBOR_TABLE_SIZE];
 		linkEstSeq = 0;
 		prevSentIdx = 0;
-
-		initNeighborTable();
 	}
 
 	// ----------------------------------------------------------------------------------
@@ -621,7 +587,8 @@ private:
 	// link estimator is received
 	void processReceivedMessage(node_id_t ll_addr, size_t len,
 			LinkEstimatorMsg *msg) {
-		uint8_t nidx;
+
+		NeighbourTableIterator it;
 
 #ifdef LINK_ESTIMATOR_DEBUG
 		echo("Receiving packet.");
@@ -647,9 +614,8 @@ private:
 		// if found
 		//   update the entry
 		// else
-		//   find an empty entry
-		//   if found
-		//     initialize the entry
+		//   if still room
+		//     add an entry and initialize it
 		//   else
 		//     find a bad neighbor to be evicted
 		//     if found
@@ -657,38 +623,34 @@ private:
 		//     else
 		//       we can not accommodate this neighbor in the table
 
-		nidx = findIdx(ll_addr);
+		it= nt.find(ll_addr);
 
-		if (nidx != INVALID_RVAL) {
+		if (it!=nt.end()) {
+
 #ifdef LINK_ESTIMATOR_DEBUG
 			echo("Found the entry so updating");
 #endif
 //			echo("neighbour %d  found.  updating", ll_addr);
-			updateNeighborEntryIdx(nidx, msg->seqno());
+			updateNeighbourEntry(it, msg->seqno());
 		} else {
 //			echo("neighbour %d not found", ll_addr);
-			nidx = findEmptyNeighborIdx();
-			if (nidx != INVALID_RVAL) {
+					//   find an empty entry
 
+			if (nt.size() != nt.max_size()) {
 #ifdef LINK_ESTIMATOR_DEBUG
-				echo("Found an empty entry");
+				echo("Adding a new entry");
 #endif
-				initNeighborIdx(nidx, ll_addr);
-//				echo("empty entry. insert %d", ll_addr);
-				updateNeighborEntryIdx(nidx, msg->seqno());
+				initNeighbourValue(&nt[ll_addr]);
+				updateNeighbourEntry(it, msg->seqno());
 			} else {
-				print_neighbor_table();
+				//print_neighbor_table();
 //				echo("no empty entry found");
-				nidx = findWorstNeighborIdx(EVICT_EETX_THRESHOLD);
-				if (nidx != INVALID_RVAL) {
-
-#ifdef LINK_ESTIMATOR_DEBUG
-					echo("Evicted neighbor %d  at idx %d",(int)NeighborTable[nidx].ll_addr,(int)nidx);
-#endif
+				it = findWorstNeighbour(EVICT_EETX_THRESHOLD);
+				if (it != nt.end()) {
 //					echo("no worst entry found for %d. signaling to the RE",
 //							ll_addr);
-					signal_LinkEstimator_evicted(NeighborTable[nidx].ll_addr);
-					initNeighborIdx(nidx, ll_addr);
+					signal_LinkEstimator_evicted(it->first);
+					initNeighbourValue(&it->second);
 				} else {
 //					echo("worst entry found for %d. should insert to RE",
 //							ll_addr);
@@ -728,36 +690,53 @@ private:
 	// the packet.
 	error_t addLinkEstHeaderAndFooter(LinkEstimatorMsg *msg, uint8_t len) {
 
-		// header and footer operations are skipped, we use cPacket methods instead.
-
+		NeighbourTableIterator it;
 		uint8_t j=0, k;
 		uint8_t maxEntries, newPrevSentIdx=0;
 
 		maxEntries = ((MAX_MESSAGE_LENGTH - LinkEstimatorMsg::HEADER_SIZE - len)
 				/ sizeof(neighbor_stat_entry_t));
 
-		for (int i = 0; i < NEIGHBOR_TABLE_SIZE && j < maxEntries; i++) {
 
-			k = (prevSentIdx + i + 1) % NEIGHBOR_TABLE_SIZE;
-			if ((NeighborTable[k].flags & VALID_ENTRY)
-					&& (NeighborTable[k].flags & MATURE_ENTRY)) {
+		//TODO: wrap around to send all entries in a round robin fashion
 
+		for (it=nt.begin();it!=nt.end() && j<maxEntries;it++) {
+			if (it->second.flags & (VALID_ENTRY|MATURE_ENTRY)) {
 				neighbor_stat_entry_t temp;
-				temp.ll_addr = NeighborTable[k].ll_addr;
-				temp.inquality = NeighborTable[k].inquality;
+				temp.ll_addr = it->first;
+				temp.inquality = it->second.inquality;
 
 				if (msg->add_neighbour_entry(j, (block_data_t*) &temp)
 						!= SUCCESS) {
 					echo("Could not add neighbour entry to LE message footer.");
 					return ERR_UNSPEC;
 				}
-
-				newPrevSentIdx = k;
-
 				j++;
 			}
 		}
-		prevSentIdx = newPrevSentIdx;
+
+		//for (int i = 0; i < NEIGHBOR_TABLE_SIZE && j < maxEntries; i++) {
+
+		//	k = (prevSentIdx + i + 1) % NEIGHBOR_TABLE_SIZE;
+		//	if ((NeighborTable[k].flags & VALID_ENTRY)
+		//			&& (NeighborTable[k].flags & MATURE_ENTRY)) {
+
+		//		neighbor_stat_entry_t temp;
+		//		temp.ll_addr = NeighborTable[k].ll_addr;
+		//		temp.inquality = NeighborTable[k].inquality;
+
+		//		if (msg->add_neighbour_entry(j, (block_data_t*) &temp)
+		//				!= SUCCESS) {
+		//			echo("Could not add neighbour entry to LE message footer.");
+		//			return ERR_UNSPEC;
+		//		}
+
+		//		newPrevSentIdx = k;
+
+		//		j++;
+		//	}
+		//}
+		//prevSentIdx = newPrevSentIdx;
 
 		msg->set_seqno(linkEstSeq++);
 		msg->set_ne(j);
@@ -765,10 +744,7 @@ private:
 	}
 
 	// initialize the given entry in the table for neighbor ll_addr
-	void initNeighborIdx(uint8_t i, node_id_t ll_addr) {
-		neighbor_table_entry_t *ne;
-		ne = &NeighborTable[i];
-		ne->ll_addr = ll_addr;
+	void initNeighbourValue(NeighbourTableValue *ne) {
 		ne->lastseq = 0;
 		ne->rcvcnt = 0;
 		ne->failcnt = 0;
@@ -777,105 +753,86 @@ private:
 		ne->inquality = 0;
 		ne->eetx = 0;
 	}
-
+	
 	// ----------------------------------------------------------------------------------
 
-	// find the index to the entry for neighbor ll_addr
-	uint8_t findIdx(node_id_t ll_addr) {
-		uint8_t i;
-		for (i = 0; i < NEIGHBOR_TABLE_SIZE; i++) {
-			if (NeighborTable[i].flags & VALID_ENTRY) {
-				if (NeighborTable[i].ll_addr == ll_addr) {
-					return i;
-				}
-			}
-		}
-		return INVALID_RVAL;
-	}
-
-	// ----------------------------------------------------------------------------------
-
-	// find an empty slot in the neighbor table
-	uint8_t findEmptyNeighborIdx() {
-		uint8_t i;
-		for (i = 0; i < NEIGHBOR_TABLE_SIZE; i++) {
-			if (NeighborTable[i].flags & VALID_ENTRY) {
-			} else {
-				return i;
-			}
-		}
-		return INVALID_RVAL;
-	}
-
-	// ----------------------------------------------------------------------------------
-
-	// find the index to the worst neighbor if the eetx
+	// find the worst neighbor if the eetx
 	// estimate is greater than the given threshold
-	uint8_t findWorstNeighborIdx(uint8_t thresholdEETX) {
-		uint8_t i, worstNeighborIdx;
-		uint16_t worstEETX, thisEETX;
+	NeighbourTableIterator findWorstNeighbour(uint8_t thresholdEETX) {
 
-		worstNeighborIdx = INVALID_RVAL;
+		NeighbourTableIterator it, worstNeighbour;
+		uint16_t worstEETX, thisEETX;
+	
+		worstNeighbour = nt.end();
 		worstEETX = 0;
-		for (i = 0; i < NEIGHBOR_TABLE_SIZE; i++) {
-			if (!(NeighborTable[i].flags & VALID_ENTRY)) {
-				continue;
+
+		for (it = nt.begin(); it != nt.end(); it++) {
+
+			if (it->second.flags & (VALID_ENTRY|MATURE_ENTRY|PINNED_ENTRY)) {
+				
+				thisEETX = it->second.eetx;
+
+				if (thisEETX >= worstEETX) {
+					worstNeighbour = it;
+					worstEETX = thisEETX;
+				}
+
 			}
-			if (!(NeighborTable[i].flags & MATURE_ENTRY)) {
-				continue;
-			}
-			if (NeighborTable[i].flags & PINNED_ENTRY) {
-				continue;
-			}
-			thisEETX = NeighborTable[i].eetx;
-			if (thisEETX >= worstEETX) {
-				worstNeighborIdx = i;
-				worstEETX = thisEETX;
-			}
+
 		}
+
 		if (worstEETX >= thresholdEETX) {
-			return worstNeighborIdx;
+
+			return worstNeighbour;
+
 		} else {
-			return INVALID_RVAL;
+
+			return nt.end();
+
 		}
 	}
 
 	// ----------------------------------------------------------------------------------
 
-	// find the index to a random entry that is
+	// find a neighbour entry that is
 	// valid but not pinned
-	uint8_t findRandomNeighborIdx() {
-		uint8_t i;
+	bool eligibleForRemoval(NeighbourTableIterator it) {
+		if (it->second.flags & VALID_ENTRY && !(it->second.flags & (PINNED_ENTRY | MATURE_ENTRY))) {
+			return true;
+		}
+		return false;
+	}
+
+	NeighbourTableIterator findRandomNeighbour() {
+		NeighbourTableIterator it;
 		uint8_t cnt;
 		uint8_t num_eligible_eviction;
 
 		num_eligible_eviction = 0;
-		for (i = 0; i < NEIGHBOR_TABLE_SIZE; i++) {
-			if (NeighborTable[i].flags & VALID_ENTRY) {
-				if (NeighborTable[i].flags & PINNED_ENTRY
-						|| NeighborTable[i].flags & MATURE_ENTRY) {
-				} else {
-					num_eligible_eviction++;
-				}
+
+		//count the number of eligible neighbours for removal
+		for (it = nt.begin(); it != nt.end(); it++) {
+			if (eligibleForRemoval(it)) {
+				num_eligible_eviction++;
 			}
 		}
 
 		if (num_eligible_eviction == 0) {
-			return INVALID_RVAL;
+			return nt.end();
 		}
 
 		cnt = random_number().rand(num_eligible_eviction);
 
-		for (i = 0; i < NEIGHBOR_TABLE_SIZE; i++) {
-			if (!NeighborTable[i].flags & VALID_ENTRY)
-				continue;
-			if (NeighborTable[i].flags & PINNED_ENTRY
-					|| NeighborTable[i].flags & MATURE_ENTRY)
-				continue;
-			if (cnt-- == 0)
-				return i;
+		//parse the table to find the generated random neighbour 
+		for (it = nt.begin(); it != nt.end(); it++) {
+			if (eligibleForRemoval(it)) {
+				if (cnt--==0) {
+					return it;
+				}
+			}
 		}
-		return INVALID_RVAL;
+
+		return nt.end();
 	}
 
 	// ----------------------------------------------------------------------------------
@@ -883,7 +840,7 @@ private:
 	// update the EETX estimator
 	// called when new beacon estimate is done
 	// also called when new DEETX estimate is done
-	void updateEETX(neighbor_table_entry_t *ne, uint16_t newEst) {
+	void updateEETX(NeighbourTableValue *ne, uint16_t newEst) {
 		ne->eetx = (ALPHA * ne->eetx + (10 - ALPHA) * newEst)/10;
 	}
 
@@ -912,15 +869,18 @@ private:
 	// update the inbound link quality by
 	// munging receive, fail count since last update
 	void updateNeighborTableEst(node_id_t n) {
-		uint8_t i, totalPkt;
-		neighbor_table_entry_t * ne;
+		NeighbourTableIterator it;
+		uint8_t totalPkt;
+		NeighbourTableValue *ne;
 		uint8_t newEst;
 		uint8_t minPkt;
 
 		minPkt = BLQ_PKT_WINDOW;
-		for (i = 0; i < NEIGHBOR_TABLE_SIZE; i++) {
-			ne = &NeighborTable[i];
-			if (ne->ll_addr == n) {
+
+		it = nt.find(n);
+
+		if (it!=nt.end()) {
+				ne=&it->second;
 				if (ne->flags & VALID_ENTRY) {
 					if (ne->inage > 0)
 						ne->inage--;
@@ -951,70 +911,61 @@ private:
 #endif
 				}
 			}
-		}
 	}
 
 	// ----------------------------------------------------------------------------------
 
-	// we received seq from the neighbor in idx
+	// we received seq from the neighbor pointed by it
 	// update the last seen seq, receive and fail count
 	// refresh the age
-	void updateNeighborEntryIdx(uint8_t idx, uint8_t seq) {
+	void updateNeighbourEntry(NeighbourTableIterator it, uint8_t seq) {
+		NeighbourTableValue *ne;
 		uint8_t packetGap;
 
-		if (NeighborTable[idx].flags & INIT_ENTRY) {
-			NeighborTable[idx].lastseq = seq;
-			NeighborTable[idx].flags &= ~INIT_ENTRY;
+		ne=&it->second;
+
+		if (ne->flags & INIT_ENTRY) {
+			ne->lastseq = seq;
+			ne->flags &= ~INIT_ENTRY;
 		}
 
-		packetGap = seq - NeighborTable[idx].lastseq;
-		NeighborTable[idx].lastseq = seq;
-		NeighborTable[idx].rcvcnt++;
-		NeighborTable[idx].inage = MAX_AGE;
+		packetGap = seq - ne->lastseq;
+		ne->lastseq = seq;
+		ne->rcvcnt++;
+		ne->inage = MAX_AGE;
 		if (packetGap > 0) {
-			NeighborTable[idx].failcnt += packetGap - 1;
+			ne->failcnt += packetGap - 1;
 		}
 		if (packetGap > MAX_PKT_GAP) {
-			NeighborTable[idx].failcnt = 0;
-			NeighborTable[idx].rcvcnt = 1;
-			NeighborTable[idx].inquality = 0;
+			ne->failcnt = 0;
+			ne->rcvcnt = 1;
+			ne->inquality = 0;
 		}
 
-		if (NeighborTable[idx].rcvcnt >= BLQ_PKT_WINDOW) {
-			updateNeighborTableEst(NeighborTable[idx].ll_addr);
+		if (ne->rcvcnt >= BLQ_PKT_WINDOW) {
+			updateNeighborTableEst(it->first);
 		}
-
 	}
 
 	// ----------------------------------------------------------------------------------
 
 	// print the neighbor table. for debugging.
-	void print_neighbor_table() {
-		uint8_t i;
-		neighbor_table_entry_t *ne;
-		for (i = 0; i < NEIGHBOR_TABLE_SIZE; i++) {
-			ne = &NeighborTable[i];
-			if (ne->flags & VALID_ENTRY) {
-				echo(
-						"%d:%d inQ=%d, inquality=%d, inA=%d, inage=%d, rcv=%d, fail=%d, failcnt=%d, Q=%d",
-						(int) i, (int) ne->ll_addr, (int) ne->inquality,
-						(int) ne->inage, (int) ne->rcvcnt, (int) ne->failcnt,
-						(int) computeEETX(ne->inquality));
-			}
-		}
-	}
+	//void print_neighbor_table() {
+	//	uint8_t i;
+	//	neighbor_table_entry_t *ne;
+	//	for (i = 0; i < NEIGHBOR_TABLE_SIZE; i++) {
+	//		ne = &NeighborTable[i];
+	//		if (ne->flags & VALID_ENTRY) {
+	//			echo(
+	//					"%d:%d inQ=%d, inquality=%d, inA=%d, inage=%d, rcv=%d, fail=%d, failcnt=%d, Q=%d",
+	//					(int) i, (int) ne->ll_addr, (int) ne->inquality,
+	//					(int) ne->inage, (int) ne->rcvcnt, (int) ne->failcnt,
+	//					(int) computeEETX(ne->inquality));
+	//		}
+	//	}
+	//}
 
 	// ----------------------------------------------------------------------------------
-
-	// initialize the neighbor table in the very beginning
-	void initNeighborTable() {
-		uint8_t i;
-
-		for (i = 0; i < NEIGHBOR_TABLE_SIZE; i++) {
-			NeighborTable[i].flags = 0;
-		}
-	}
-
 }
 ;
 

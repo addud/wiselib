@@ -67,14 +67,6 @@ namespace wiselib {
 		}
 
 		// -----------------------------------------------------------------
-
-		CtpNeighbourTableValue(uint8_t flags, uint8_t inage) :
-		lastseq(0), rcvcnt(0), failcnt(0), inquality(0), eetx(0), data_success(0), data_total(0) {
-			flags=flags;
-			iange=inage;
-		}
-
-		// -----------------------------------------------------------------
 	};
 
 }
