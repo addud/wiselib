@@ -118,12 +118,12 @@ namespace wiselib {
 			write<OsModel, block_data_t, uint8_t>(buffer + THL_POS, thl);
 		}
 		// --------------------------------------------------------------------
-		ctp_msg_etx_t etx() {
-			return read<OsModel, block_data_t, ctp_msg_etx_t>(buffer + ETX_POS);
+		ctp_etx_t etx() {
+			return read<OsModel, block_data_t, ctp_etx_t>(buffer + ETX_POS);
 		}
 		// --------------------------------------------------------------------
-		void set_etx(ctp_msg_etx_t etx) {
-			write<OsModel, block_data_t, ctp_msg_etx_t>(buffer + ETX_POS, etx);
+		void set_etx(ctp_etx_t etx) {
+			write<OsModel, block_data_t, ctp_etx_t>(buffer + ETX_POS, etx);
 		}
 		// --------------------------------------------------------------------
 		node_id_t origin() {

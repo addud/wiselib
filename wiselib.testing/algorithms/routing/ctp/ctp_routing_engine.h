@@ -63,7 +63,6 @@ namespace wiselib {
 
 		typedef typename Timer::millis_t millis_t;
 		typedef typename Clock::time_t time_t;
-		typedef typename RandomNumber::value_t value_t;
 
 		typedef CtpRoutingEngineMsg<OsModel, Radio> RoutingMessage;
 
@@ -90,8 +89,8 @@ namespace wiselib {
 
 		~CtpRoutingEngine() {
 #ifdef ROUTING_ENGINE_DEBUG
-			debug().debug("%d: ", self);
-			debug().debug("Re: Destroyed\n");
+			echo("%d: ", self);
+			echo("Re: Destroyed\n");
 #endif
 		}
 
@@ -130,15 +129,11 @@ namespace wiselib {
 
 		int enable(void) {
 #ifdef ROUTING_ENGINE_DEBUG
-			debug().debug("%d: ", self);
-			debug().debug("Re: Boot for %d\n", self);
+			echo("%d: ", self);
+			echo("Re: Boot for %d\n", self);
 #endif
 
 			routeInfoInit(&routeInfo);
-
-			random_number().srand(
-				clock().milliseconds(clock().time()) * (3 * self + 2));
-			command_StdControl_start();
 
 			radio().template reg_recv_callback<self_type, &self_type::receive>(
 				this);
@@ -146,8 +141,7 @@ namespace wiselib {
 			le->template reg_event_callback<self_type, &self_type::rcv_event>(
 				this);
 
-			timer().template set_timer<self_type, &self_type::timer_elapsed>(15000,
-				this, 0);
+			command_StdControl_start();
 
 			return radio().enable_radio();
 
@@ -157,8 +151,8 @@ namespace wiselib {
 
 		int disable(void) {
 #ifdef ROUTING_ENGINE_DEBUG
-			debug().debug("%d: ", self);
-			debug().debug("Re: Disable\n");
+			echo("%d: ", self);
+			echo("Re: Disable\n");
 #endif
 
 			command_StdControl_stop();
@@ -231,7 +225,7 @@ namespace wiselib {
 
 		// -------------------------------------------------------------------------
 
-		error_t command_CtpInfo_getEtx(ctp_msg_etx_t* etx) {
+		error_t command_CtpInfo_getEtx(ctp_etx_t* etx) {
 			if (etx == NULL)
 				return ERR_UNSPEC;
 			if (routeInfo.parent == INVALID_ADDR)
@@ -257,12 +251,6 @@ namespace wiselib {
 		// --------------------------------------------------------------------
 
 		void command_CtpInfo_triggerRouteUpdate() {
-			resetInterval();
-		}
-
-		// --------------------------------------------------------------------
-
-		void command_CtpInfo_triggerImmediateRouteUpdate() {
 			resetInterval();
 		}
 
@@ -317,8 +305,8 @@ namespace wiselib {
 				signal_Routing_routeFound();
 			}
 #ifdef ROUTING_ENGINE_DEBUG
-			debug().debug("%d: ", self);
-			debug().debug("RootControl.setRoot - I'm a root now! %d\n",
+			echo("%d: ", self);
+			echo("RootControl.setRoot - I'm a root now! %d\n",
 				(int) routeInfo.parent);
 #endif
 			return SUCCESS;
@@ -330,8 +318,8 @@ namespace wiselib {
 			state_is_root = false;
 			routeInfoInit(&routeInfo);
 #ifdef ROUTING_ENGINE_DEBUG
-			debug().debug("%d: ", self);
-			debug().debug("RootControl.unsetRoot - I'm not a root now!\n");
+			echo("%d: ", self);
+			echo("RootControl.unsetRoot - I'm not a root now!\n");
 #endif
 
 			updateRouteTask();
@@ -530,8 +518,8 @@ namespace wiselib {
 
 			default: {
 #ifdef ROUTING_ENGINE_DEBUG
-				debug().debug("%d: ", self);
-				debug().debug("Re: TimerFiredCallback unexpected timeout: %d\n",
+				echo("%d: ", self);
+				echo("Re: TimerFiredCallback unexpected timeout: %d\n",
 					timeout);
 				return;
 #endif
@@ -589,15 +577,14 @@ namespace wiselib {
 					uint16_t nextInt;
 
 					//TODO: Investigate random number generation
-					nextInt = random_number().rand(BEACON_INTERVAL);
-					//nextInt = command_Random_rand16(0) % BEACON_INTERVAL ;
+					nextInt = random_number().randShort(BEACON_INTERVAL);
 
 					nextInt += BEACON_INTERVAL >> 1;
 					setTimer((void*) BEACON_TIMER, nextInt);
 				}
 #ifdef ROUTING_ENGINE_DEBUG
-				debug().debug("%d: ", self);
-				debug().debug("RE: stdControl.start - running %d\n", running);
+				echo("%d: ", self);
+				echo("RE: stdControl.start - running %d\n", running);
 #endif
 			}
 			return SUCCESS;
@@ -609,8 +596,8 @@ namespace wiselib {
 			running = false;
 			radioOn = false;
 #ifdef ROUTING_ENGINE_DEBUG
-			debug().debug("%d: ", self);
-			debug().debug("RE: stdControl.stop - running %d\n", running);
+			echo("%d: ", self);
+			echo("RE: stdControl.stop - running %d\n", running);
 #endif
 			return SUCCESS;
 		}
@@ -619,7 +606,7 @@ namespace wiselib {
 
 		/* Is this quality measure better than the minimum threshold? */
 		// Implemented assuming quality is EETX
-		bool passLinkEtxThreshold(uint16_t etx) {
+		bool passLinkEtxThreshold(ctp_etx_t etx) {
 			return true;
 			//    	return (etx < ETX_THRESHOLD);
 		}
@@ -628,10 +615,10 @@ namespace wiselib {
 
 		/* Converts the output of the link estimator to path metric
 		* units, that can be *added* to form path metric measures */
-		uint16_t evaluateEtx(uint16_t quality) {
+		ctp_etx_t evaluateEtx(ctp_etx_t quality) {
 #ifdef ROUTING_ENGINE_DEBUG
-			debug().debug("%d: ", self);
-			debug().debug("evaluateEtx - %d -> %d\n", (int) quality,
+			echo("%d: ", self);
+			echo("evaluateEtx - %d -> %d\n", (int) quality,
 				(int) (quality + 10));
 #endif
 			return (quality + 10);
@@ -641,14 +628,14 @@ namespace wiselib {
 
 		/* updates the routing information, using the info that has been received
 		* from neighbor beacons. Two things can cause this info to change:
-		* neighbor beacons, changes in link estimates, including neighbor eviction */
+		* neighbour beacons, changes in link estimates, including neighbour eviction */
 		void updateRouteTask() {
 			RoutingTableValue entry;
 			RoutingTableIterator it, best;
 			bool best_found = false;
-			uint16_t minEtx;
-			uint16_t currentEtx;
-			uint16_t linkEtx, pathEtx;
+			ctp_etx_t minEtx;
+			ctp_etx_t currentEtx;
+			ctp_etx_t linkEtx, pathEtx;
 
 			if (state_is_root)
 				return;
@@ -659,8 +646,8 @@ namespace wiselib {
 			currentEtx = MAX_METRIC;
 
 #ifdef ROUTING_ENGINE_DEBUG
-			debug().debug("%d: ", self);
-			debug().debug("updateRouteTask");
+			echo("%d: ", self);
+			echo("updateRouteTask");
 #endif
 
 			/* Find best path in table, other than our current */
@@ -670,8 +657,8 @@ namespace wiselib {
 				// Avoid bad entries and 1-hop loops
 				if (entry.parent == INVALID_ADDR || entry.parent == self) {
 #ifdef ROUTING_ENGINE_DEBUG
-					debug().debug("%d: ", self);
-					debug().debug(
+					echo("%d: ", self);
+					echo(
 						"routingTable neighbour: [id: %d, neighbour: %d, etx: NO ROUTE]\n",
 						(int) it->first, entry.parent);
 #endif
@@ -684,8 +671,8 @@ namespace wiselib {
 					le->command_LinkEstimator_getLinkQuality(it->first));
 
 #ifdef ROUTING_ENGINE_DEBUG
-				debug().debug("%d: ", self);
-				debug().debug(
+				echo("%d: ", self);
+				echo(
 					"routingTable neighbour: [id: %d, neighbour: %d, etx: %d]\n",
 					(int) it->first, entry.parent, (int) linkEtx);
 #endif
@@ -694,8 +681,8 @@ namespace wiselib {
 				/* Operations specific to the current parent */
 				if (it->first == routeInfo.parent) {
 #ifdef ROUTING_ENGINE_DEBUG
-					debug().debug("%d: ", self);
-					debug().debug("already parent\n");
+					echo("%d: ", self);
+					echo("already parent\n");
 #endif
 					currentEtx = pathEtx;
 					/* update routeInfo with parent's current info */
@@ -710,8 +697,8 @@ namespace wiselib {
 				/* Ignore links that are bad */
 				if (!passLinkEtxThreshold(linkEtx)) {
 #ifdef ROUTING_ENGINE_DEBUG
-					debug().debug("%d: ", self);
-					debug().debug("did not pass threshold.\n");
+					echo("%d: ", self);
+					echo("did not pass threshold.\n");
 #endif
 					continue;
 				}
@@ -722,6 +709,10 @@ namespace wiselib {
 					best_found = true;
 				}
 			}
+
+			//if (best_found) {
+			//	echo("Best neighbour found %d with etx = %d but minEtx = %d",best->first, best->second.etx, minEtx);
+			//}
 
 			/* Now choose between the current parent and the best neighbor */
 			/* Requires that:
@@ -747,8 +738,8 @@ namespace wiselib {
 						if (best_found) {
 
 #ifdef ROUTING_ENGINE_DEBUG
-							debug().debug("%d: ", self);
-							debug().debug("Changed parent from %d to %d",
+							echo("%d: ", self);
+							echo("Changed parent from %d to %d",
 								(int) routeInfo.parent, (int) best->first);
 #endif
 							le->command_LinkEstimator_unpinNeighbor(
@@ -759,8 +750,10 @@ namespace wiselib {
 							routeInfo.parent = best->first;
 							routeInfo.etx = best->second.etx;
 							routeInfo.congested = best->second.congested;
+
+							//echo("Updated route: parent = %d, etx = %d",routeInfo.parent, routeInfo.etx);
 						} else {
-							debug().debug(
+							echo(
 								"%d: EROR. Trying to use a NULL best routing node.",
 								self);
 						}
@@ -771,7 +764,6 @@ namespace wiselib {
 			/* We can only loose a route to a parent if it has been evicted. If it hasn't
 			* been just evicted then we already did not have a route */
 			if (justEvicted && routeInfo.parent == INVALID_ADDR) {
-				//TODO Callback to FE to signal no route found
 				signal_Routing_noRoute();
 			}
 			/* On the other hand, if we didn't have a parent (no currentEtx) and now we
@@ -794,7 +786,7 @@ namespace wiselib {
 			}
 
 #ifdef CTP_DEBUGGING
-			if (!areConnected(self, from)) {
+			if (getConnection(self, from)==NULL) {
 				return;
 			}
 #endif
@@ -862,8 +854,8 @@ namespace wiselib {
 			}
 
 #ifdef ROUTING_ENGINE_DEBUG
-			debug().debug("%d: ", self);
-			debug().debug("sendBeaconTask - parent: %d etx: \n",
+			echo("%d: ", self);
+			echo("sendBeaconTask - parent: %d etx: \n",
 				(int) beaconMsg.parent(), (int) beaconMsg.etx());
 #endif
 
@@ -871,7 +863,8 @@ namespace wiselib {
 			//we need to clone the message, otherwise we get memory errors
 			RoutingMessage dup=beaconMsg;
 
-//			echo("beacon sent - parent: %d etx: %d", beaconMsg.parent(), beaconMsg.etx());
+			//echo("beacon sent - parent: %d etx: %d", beaconMsg.parent(), beaconMsg.etx());
+			//printRoutingTable();
 
 			radio().send(Radio::BROADCAST_ADDRESS, RoutingMessage::HEADER_SIZE,
 				reinterpret_cast<block_data_t*>(&dup));
@@ -894,8 +887,8 @@ namespace wiselib {
 					updateRouteTask(); // always the most up to date info
 					sendBeaconTask();
 #ifdef ROUTING_ENGINE_DEBUG
-					debug().debug("%d: ", self);
-					debug().debug("Beacon timer fired.\n");
+					echo("%d: ", self);
+					echo("Beacon timer fired.\n");
 #endif
 					remainingInterval();
 				} else {
@@ -911,13 +904,14 @@ namespace wiselib {
 		void event_BeaconReceive_receive(node_id_t from, RoutingMessage* rcvBeacon) {
 			bool congested;
 
+
 			// we skip the check of beacon length.
 
 			congested = rcvBeacon->congestion();
 
 #ifdef ROUTING_ENGINE_DEBUG
-			debug().debug("%d: ", self);
-			debug().debug("BeaconReceive.receive - from %d [parent: %d etx: %d] \n",
+			echo("%d: ", self);
+			echo("BeaconReceive.receive - from %d [parent: %d etx: %d] \n",
 				(int) from, (int) (rcvBeacon->parent()),
 				(int) (rcvBeacon->etx()));
 #endif
@@ -931,12 +925,12 @@ namespace wiselib {
 					(int) from, (int) (rcvBeacon->parent()),
 					(int) (rcvBeacon->etx()));
 #endif
-				//			echo("received etx: %d from %d", rcvBeacon->etx(), from);
+				/*echo("received etx: %d from %d", rcvBeacon->etx(), from);*/
 				if (rcvBeacon->etx() == 0) {
 
 #ifdef ROUTING_ENGINE_DEBUG
-					debug().debug("%d: ", self);
-					debug().debug("from a root, inserting if not in table");
+					echo("%d: ", self);
+					echo("from a root, inserting if not in table");
 #endif
 					le->command_LinkEstimator_insertNeighbor(from);
 					//				echo("Pinned %d", from);
@@ -991,8 +985,8 @@ namespace wiselib {
 		*/
 		bool event_CompareBit_shouldInsert(block_data_t *msg) {
 			bool found = false;
-			uint16_t pathEtx;
-			uint16_t neighEtx;
+			ctp_etx_t pathEtx;
+			ctp_etx_t neighEtx;
 			RoutingTableIterator it;
 			RoutingTableValue entry;
 			RoutingMessage* rcvBeacon;
@@ -1003,7 +997,7 @@ namespace wiselib {
 			// checks if it is a RoutingMessage
 			if (rcvBeacon == NULL) {
 				//TODO: Should forward to the FE??
-				debug().debug("%d: CompareBit not Routing message\n", self);
+				echo("%d: CompareBit not Routing message\n", self);
 				return false;
 			}
 
@@ -1045,9 +1039,9 @@ namespace wiselib {
 		************************************************************/
 
 		error_t routingTableUpdateEntry(node_id_t from, node_id_t parent,
-			uint16_t etx) {
+			ctp_etx_t etx) {
 				RoutingTableIterator it;
-				uint16_t linkEtx;
+				ctp_etx_t linkEtx;
 				linkEtx = evaluateEtx(
 					le->command_LinkEstimator_getLinkQuality(from));
 
@@ -1059,8 +1053,8 @@ namespace wiselib {
 						//TODO: add replacement here, replace the worst
 						//}
 #ifdef ROUTING_ENGINE_DEBUG
-						debug().debug("%d: ", self);
-						debug().debug("routingTableUpdateEntry - FAIL, table full\n");
+						echo("%d: ", self);
+						echo("routingTableUpdateEntry - FAIL, table full\n");
 #endif
 						return ERR_BUSY;
 				} else if (it == routingTable.end()) {
@@ -1073,14 +1067,17 @@ namespace wiselib {
 						entry.congested = false;
 						routingTable[from] = entry;
 
+						//echo("Added new entry %d",from);
+						//printRoutingTable();
+
 #ifdef ROUTING_ENGINE_DEBUG
-						debug().debug("%d: ", self);
-						debug().debug("routingTableUpdateEntry - OK, new entry\n");
+						echo("%d: ", self);
+						echo("routingTableUpdateEntry - OK, new entry\n");
 #endif
 					} else {
 #ifdef ROUTING_ENGINE_DEBUG
-						debug().debug("%d: ", self);
-						debug().debug(
+						echo("%d: ", self);
+						echo(
 							"routingTableUpdateEntry - Fail, link quality (%d) below threshold\n",
 							(int) linkEtx);
 #endif
@@ -1091,9 +1088,13 @@ namespace wiselib {
 					it->second.parent = parent;
 					it->second.etx = etx;
 					it->second.haveHeard = 1;
+
+					//echo("Updated entry %d",from);
+					//printRoutingTable();
+
 #ifdef ROUTING_ENGINE_DEBUG
-					debug().debug("%d: ", self);
-					debug().debug("routingTableUpdateEntry - OK, updated entry\n");
+					echo("%d: ", self);
+					echo("routingTableUpdateEntry - OK, updated entry\n");
 #endif
 				}
 
@@ -1112,6 +1113,15 @@ namespace wiselib {
 
 			routingTable.erase(it);
 			return SUCCESS;
+		}
+
+		void printRoutingTable() {
+			RoutingTableIterator it;
+			echo("Routing table:");
+			for(it=routingTable.begin();it!=routingTable.end();it++) {
+				echo("neighbour = %d, parent = %d, etx = %d",it->first, it->second.parent,it->second.etx);
+			}
+
 		}
 
 		/*********** end routing table functions ***************/

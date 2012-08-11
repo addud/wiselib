@@ -41,7 +41,7 @@ namespace wiselib {
 
 		enum HeaderSize {
 			HEADER_SIZE = sizeof(message_id_t) +sizeof(ctp_msg_options_t)
-			+ sizeof(node_id_t) + sizeof(ctp_msg_etx_t)
+			+ sizeof(node_id_t) + sizeof(ctp_etx_t)
 		};
 
 		// --------------------------------------------------------------------
@@ -116,12 +116,12 @@ namespace wiselib {
 			write<OsModel, block_data_t, node_id_t>(buffer + PARENT_POS, parent);
 		}
 		// --------------------------------------------------------------------
-		ctp_msg_etx_t etx() {
-			return read<OsModel, block_data_t, ctp_msg_etx_t>(buffer + ETX_POS);
+		ctp_etx_t etx() {
+			return read<OsModel, block_data_t, ctp_etx_t>(buffer + ETX_POS);
 		}
 		// --------------------------------------------------------------------
-		void set_etx(ctp_msg_etx_t etx) {
-			write<OsModel, block_data_t, ctp_msg_etx_t>(buffer + ETX_POS, etx);
+		void set_etx(ctp_etx_t etx) {
+			write<OsModel, block_data_t, ctp_etx_t>(buffer + ETX_POS, etx);
 		}
 
 	private:

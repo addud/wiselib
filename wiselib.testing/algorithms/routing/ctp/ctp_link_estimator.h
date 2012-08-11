@@ -33,7 +33,6 @@
 #include "algorithms/routing/ctp/ctp_neighbour_table_value.h"
 
 #define LE_MAX_EVENT_RECEIVERS		2
-#define NEIGHBOR_TABLE_SIZE			10
 
 namespace wiselib {
 
@@ -69,7 +68,6 @@ public:
 
 	typedef typename Timer::millis_t millis_t;
 	typedef typename Clock::time_t time_t;
-	typedef typename RandomNumber::value_t value_t;
 
 	typedef delegate3<void, node_id_t, size_t, block_data_t*> radio_delegate_t;
 	typedef vector_static<OsModel, radio_delegate_t, RADIO_BASE_MAX_RECEIVERS> RecvCallbackVector;
@@ -80,7 +78,7 @@ public:
 	typedef typename EventCallbackVector::iterator EventCallbackVectorIterator;
 
 	typedef struct neighbor_stat_entry {
-		uint16_t ll_addr;
+		node_id_t ll_addr;
 		uint8_t inquality;
 	} neighbor_stat_entry_t;
 
@@ -198,7 +196,7 @@ public:
 
 	~CtpLinkEstimator() {
 #ifdef LINK_ESTIMATOR_DEBUG
-		debug().debug( "LE: Destroyed\n" );
+		echo( "LE: Destroyed\n" );
 #endif
 	}
 
@@ -229,15 +227,11 @@ public:
 
 	int enable_radio(void) {
 #ifdef LINK_ESTIMATOR_DEBUG
-		debug().debug( "LE: Boot for %d\n", radio().id() );
+		echo( "LE: Boot for %d\n", radio().id() );
 #endif
 
 		radio().template reg_recv_callback<self_type, &self_type::receive>(
 				this);
-
-		//TODO: Move init functions to init_variables function
-		random_number().srand(
-				clock().milliseconds(clock().time()) * (3 * radio().id() + 2));
 
 		return radio().enable_radio();
 	}
@@ -257,7 +251,7 @@ public:
 	// -----------------------------------------------------------------------
 
 	int send(node_id_t destination, size_t len, block_data_t *data) {
-//		debug().debug("LE sending from %d",radio().id());
+//		echo("LE sending from %d",radio().id());
 		return command_Send_send(destination, len, data);
 	}
 
@@ -315,7 +309,14 @@ public:
 	// ----------------------------------------------------------------------------------
 
 	// return bi-directional link quality to the neighbour
-	uint16_t command_LinkEstimator_getLinkQuality(node_id_t neighbour) {
+	ctp_etx_t command_LinkEstimator_getLinkQuality(node_id_t neighbour) {
+
+#if defined CTP_DEBUGGING && defined DEBUG_ETX
+		connections_t* link = getConnection(self, neighbour);
+		if (link!=NULL) {
+			return link->etx;
+		}
+#endif
 
 		NeighbourTableIterator it;
 		it = nt.find(neighbour);
@@ -542,9 +543,8 @@ private:
 			return;
 		}
 
-
 #ifdef CTP_DEBUGGING
-		if (!areConnected(self, from)) {
+		if (getConnection(self, from)==NULL) {
 			return;
 		}
 #endif
@@ -761,7 +761,7 @@ private:
 	NeighbourTableIterator findWorstNeighbour(uint8_t thresholdEETX) {
 
 		NeighbourTableIterator it, worstNeighbour;
-		uint16_t worstEETX, thisEETX;
+		ctp_etx_t worstEETX, thisEETX;
 	
 		worstNeighbour = nt.end();
 		worstEETX = 0;
@@ -821,7 +821,7 @@ private:
 			return nt.end();
 		}
 
-		cnt = random_number().rand(num_eligible_eviction);
+		cnt = random_number().randChar(num_eligible_eviction);
 
 		//parse the table to find the generated random neighbour 
 		for (it = nt.begin(); it != nt.end(); it++) {
@@ -840,7 +840,7 @@ private:
 	// update the EETX estimator
 	// called when new beacon estimate is done
 	// also called when new DEETX estimate is done
-	void updateEETX(NeighbourTableValue *ne, uint16_t newEst) {
+	void updateEETX(NeighbourTableValue *ne, ctp_etx_t newEst) {
 		ne->eetx = (ALPHA * ne->eetx + (10 - ALPHA) * newEst)/10;
 	}
 
@@ -851,8 +851,8 @@ private:
 	// EETX (Extra Expected number of Transmission)
 	// EETX = ETX - 1
 	// computeEETX returns EETX*10
-	uint8_t computeEETX(uint8_t q1) {
-		uint16_t q;
+	ctp_etx_t computeEETX(uint8_t q1) {
+		ctp_etx_t q;
 		if (q1 > 0) {
 			q = 2550 / q1 - 10;
 			if (q > 255) {

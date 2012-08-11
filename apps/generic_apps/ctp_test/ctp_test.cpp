@@ -19,6 +19,7 @@ typedef Os::TxRadio Radio;
 typedef Os::Debug Debug;
 typedef Os::Clock Clock;
 typedef Os::Timer Timer;
+typedef Os::Uart Uart;
 typedef Radio::node_id_t node_id_t;
 typedef Radio::block_data_t block_data_t;
 
@@ -47,14 +48,23 @@ typedef wiselib::CtpForwardingEngine<Os, DataMessage, SendQueueValue, SendQueue,
 class CtpTest {
 
 public:
+
+	char c;
+
 	void init(Os::AppMainParameter& value) {
 		radio_ = &wiselib::FacetProvider<Os, Radio>::get_facet(value);
 		timer_ = &wiselib::FacetProvider<Os, Timer>::get_facet(value);
 		debug_ = &wiselib::FacetProvider<Os, Debug>::get_facet(value);
 		clock_ = &wiselib::FacetProvider<Os, Clock>::get_facet(value);
+		uart_ = &wiselib::FacetProvider<Os, Uart>::get_facet( value );
 
 		radio_->set_power(Radio::TxPower::MAX);
-		random_number_.init(*debug_, *clock_);
+		random_number_.init(*radio_, *debug_, *clock_);
+
+		  uart_->enable_serial_comm();
+
+		  //uart_->reg_read_callback<CtpTest, &CtpTest::receive_serial>( this );
+
 
 		//TODO: Send random_number_ by value
 		le_.init(*radio_, *timer_, *debug_, *clock_, random_number_);
@@ -73,17 +83,22 @@ public:
 			}
 		}
 
-		debug_->debug("Node %d started", radio_->id());
+		debug_->debug("Node %d started\n", radio_->id());
 
 		fe_.reg_recv_callback<CtpTest, &CtpTest::receive_radio_message>(this);
 
 		if (radio_->id() == wiselib::nodes[3]) {
 			timer_->set_timer<CtpTest, &CtpTest::start>(12000, this, 0);
+			timer_->set_timer<CtpTest, &CtpTest::change_link>(30000, this, 0);
 		}
+
+		c='0';
 	}
 	// --------------------------------------------------------------------
 	void start(void*) {
-		block_data_t message[] = "caca\0";
+		block_data_t message[] = " caca\0";
+
+		message[0] = c++;
 
 		//TODO: FiX: doesn't get back here after sending
 
@@ -94,6 +109,12 @@ public:
 // following can be used for periodic messages to sink
 		timer_->set_timer < CtpTest, &CtpTest::start > (5000, this, 0);
 	}
+
+	void change_link(void*) {
+		debug_->debug("Removing link\n");
+		wiselib::connections[0].etx=1000;
+	}
+
 	// --------------------------------------------------------------------
 	void receive_radio_message(node_id_t from, Radio::size_t len,
 			block_data_t *buf) {
@@ -101,14 +122,18 @@ public:
 				radio_->id(), buf, from);
 	}
 
-	void event(uint8_t code) {
-//		debug_->debug("CALLBACK: %d\n", code);
-	}
+   void receive_serial( size_t len, block_data_t *buf )
+   {
+      debug_->debug( "UART: received len %i, message is '%s'\n", len, buf );
+      //uart_->write( len, (Uart::block_data_t*)buf );
+   }
+
 private:
 	Radio::self_pointer_t radio_;
 	Timer::self_pointer_t timer_;
 	Debug::self_pointer_t debug_;
 	Clock::self_pointer_t clock_;
+	Uart::self_pointer_t uart_;
 	RandomNumber random_number_;
 	LinkEstimator le_;
 	RoutingEngine re_;

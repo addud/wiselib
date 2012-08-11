@@ -51,7 +51,7 @@ namespace wiselib {
 		uint8_t inquality;
 		// EETX for the link to this neighbor. This is the quality returned to
 		// the users of the link estimator
-		uint16_t eetx;
+		ctp_etx_t eetx;
 		// Number of data packets successfully sent (ack'd) to this neighbor
 		// since the last data estimator update round. This update happens
 		// every DLQ_PKT_WINDOW data packets

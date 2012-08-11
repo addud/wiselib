@@ -42,7 +42,7 @@ namespace wiselib {
 		// ----------------------------------------------------------------------------------
 
 		node_id_t parent;
-		ctp_msg_etx_t etx;
+		ctp_etx_t etx;
 		bool haveHeard;
 		bool congested;
 

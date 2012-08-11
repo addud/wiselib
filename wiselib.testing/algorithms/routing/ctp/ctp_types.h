@@ -30,7 +30,7 @@ namespace wiselib
 {
 
    typedef uint8_t ctp_msg_options_t;
-   typedef uint16_t ctp_msg_etx_t;
+   typedef uint16_t ctp_etx_t;
 
    typedef int error_t;
 

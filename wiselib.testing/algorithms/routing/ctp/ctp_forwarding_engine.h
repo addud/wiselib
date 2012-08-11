@@ -63,7 +63,6 @@ namespace wiselib {
 
 		typedef typename Timer::millis_t millis_t;
 		typedef typename Clock::time_t time_t;
-		typedef typename RandomNumber::value_t value_t;
 
 		typedef SendQueueValue fe_queue_entry_t;
 		typedef typename SentCache::iterator SentCacheIterator;
@@ -112,8 +111,8 @@ namespace wiselib {
 
 		~CtpForwardingEngine() {
 #ifdef ROUTING_ENGINE_DEBUG
-			debug().debug("%d: ", self);
-			debug().debug("Re: Destroyed\n");
+			echo("%d: ", self);
+			echo("Re: Destroyed\n");
 #endif
 		}
 
@@ -154,17 +153,11 @@ namespace wiselib {
 		///@{
 		int enable_radio(void) {
 
-			random_number().srand(
-				clock().milliseconds(clock().time()) * (3 * self + 2));
-
 			radio().template reg_recv_callback<self_type, &self_type::receive>(
 				this);
 
-			//cre->template reg_event_callback<self_type, &self_type::rcv_event>(
-			//		this);
-
-			timer().template set_timer<self_type, &self_type::timer_elapsed>(15000,
-				this, 0);
+			cre->template reg_event_callback<self_type, &self_type::rcv_event>(
+					this);
 
 			command_StdControl_start();
 			return radio().enable_radio();
@@ -242,6 +235,11 @@ namespace wiselib {
 			return idx;
 		}
 
+		// A simple predicate for now to determine congestion state of this node.
+		bool command_CtpCongestion_isCongested() {
+			return command_SendQueue_size() > congestionThreshold;
+		}
+
 	private:
 
 		enum {
@@ -268,6 +266,19 @@ namespace wiselib {
 		enum TimerIds {
 			RETXTIMER = 1, CONGESTION_TIMER = 2, POST_SENDTASK = 3
 		};
+
+		// --------------------------------------------------------------------
+
+		typedef enum {
+			//The message was not in the sent cache
+			NO_MATCH = 0, 
+			//This exact message instance was found in the sent cache => duplicate message
+			FULL_MATCH = 1, 
+			//Another instance of the same message has been found
+			//This means the message has passed through the node before already but has a different THL
+			//This may point to a recent change in the topology/ETX values that causes the message to float around until a new route is found
+			PARTIAL_MATCH = 2 
+		} cache_lookup_result_t;
 
 		// --------------------------------------------------------------------
 
@@ -446,8 +457,8 @@ namespace wiselib {
 			default:
 				{
 #ifdef FORWARDING_ENGINE_DEBUG
-					debug().debug("%d: ", self);
-					debug().debug("Re: TimerFiredCallback unexpected timeout: %d\n",
+					echo("%d: ", self);
+					echo("Re: TimerFiredCallback unexpected timeout: %d\n",
 						timeout);
 					return;
 #endif
@@ -476,7 +487,7 @@ namespace wiselib {
 		*/
 		void forward(size_t len, DataMessage* msg) {
 			fe_queue_entry_t *qe;
-			uint16_t gradient;
+			ctp_etx_t gradient;
 			DataMessage* poolMsg;
 
 			if (entrypool_.empty()) {
@@ -507,7 +518,7 @@ namespace wiselib {
 						// we are in a loop.
 						// Trigger a route update and backoff.
 						echo("Possible Loop Detection...");
-						cre->command_CtpInfo_triggerImmediateRouteUpdate();
+						cre->command_CtpInfo_triggerRouteUpdate();
 						startRetxmitTimer(LOOPY_WINDOW, LOOPY_OFFSET);
 					}
 				}
@@ -539,7 +550,14 @@ namespace wiselib {
 				return;
 			}
 
+#ifdef CTP_DEBUGGING
+		if (getConnection(self, from)==NULL) {
+			return;
+		}
+#endif
+
 			DataMessage* msg = reinterpret_cast<DataMessage*>(data);
+			cache_lookup_result_t cacheResult;
 
 			if (msg->msg_id() != CtpDataMsgId) {
 				return;
@@ -557,11 +575,23 @@ namespace wiselib {
 			thl++;
 			msg->set_thl(thl);
 
+			//echo("Received msg = %s, origin = %d, seqno = %d, thl = %d, etx = %d, from %d",msg->payload(), msg->origin(),msg->seqno(),msg->thl(),msg->etx(),from);
+			//printSentCache();
+
 			//See if we remember having seen this packet
 			//We look in the sent cache ...
-			if (command_SentCache_lookup(msg)) {
+			cacheResult = command_SentCache_lookup(msg);
+			if (cacheResult==FULL_MATCH) {
+				//Message instance duplicate -> discard
+				echo("Discarding duplicate msg = %s, seqno = %d, thl = %d from %d",msg->payload(),msg->seqno(),msg->thl(),from);
 				return;
+			} else if (cacheResult==PARTIAL_MATCH) {
+				//The message has passed through the node before
+				//It is floating aroumd waiting for a route to be found
+				//Speed up the process by forcing the RE to recompute routes 
+				cre->command_CtpInfo_recomputeRoutes();
 			}
+
 			//... and in the queue for duplicates
 			if (command_SendQueue_size() > 0) {
 				for (i = command_SendQueue_size(); --i;) {
@@ -613,11 +643,6 @@ namespace wiselib {
 			post_sendTask();
 		}
 
-		// A simple predicate for now to determine congestion state of this node.
-		bool command_CtpCongestion_isCongested() {
-			return command_SendQueue_size() > congestionThreshold;
-		}
-
 		// A CTP packet ID is based on the origin and the THL field, to
 		// implement duplicate suppression as described in TEP 123.
 		bool command_CtpPacket_matchInstance(DataMessage* msg1,
@@ -628,7 +653,7 @@ namespace wiselib {
 		}
 
 		void startRetxmitTimer(uint16_t mask, uint16_t offset) {
-			uint16_t r = random_number().rand(UINT_MAX);
+			uint16_t r = random_number().randShort();
 			r &= mask;
 			r += offset;
 			setTimer((void*) RETXTIMER, r);
@@ -636,7 +661,7 @@ namespace wiselib {
 		}
 
 		void startCongestionTimer(uint16_t mask, uint16_t offset) {
-			uint16_t r = random_number().rand(UINT_MAX);
+			uint16_t r = random_number().randShort();
 			r &= mask;
 			r += offset;
 			setTimer((void*) CONGESTION_TIMER, r);
@@ -717,12 +742,11 @@ namespace wiselib {
 
 					return;
 			} else {
+
 				error_t subsendResult;
-
 				fe_queue_entry_t* qe = command_SendQueue_head();
-
 				node_id_t dest = cre->command_Routing_nextHop();
-				ctp_msg_etx_t gradient;
+				ctp_etx_t gradient;
 
 				if (cre->command_CtpInfo_isNeighborCongested(dest)) { // NOT CHECKED
 					// Our parent is congested. We should wait.
@@ -741,7 +765,7 @@ namespace wiselib {
 					parentCongested = false;
 				}
 				// Once we are here, we have decided to send the packet.
-				if (command_SentCache_lookup(qe->msg)) { // NOT CHECKED
+				if (command_SentCache_lookup(qe->msg)==FULL_MATCH) { // NOT CHECKED
 					command_SendQueue_dequeue();
 					echo("sendTask: Message found in the sent cache");
 					//We must post the task instead of calling it directly
@@ -761,6 +785,12 @@ namespace wiselib {
 				if (cre->command_RootControl_isRoot()) { // CHECK -> OK: loppbacked message to app layer.
 
 					ackPending = false;
+
+					fe_queue_entry_t* entry = command_SendQueue_head();
+					
+					notify_receivers(self, entry->len, entry->msg->payload());
+
+					command_SendQueue_dequeue();
 
 					echo("sendTask - I'm root, so loopback and signal receive.");
 
@@ -787,38 +817,11 @@ namespace wiselib {
 
 				subsendResult = radio().send(dest, qe->len, reinterpret_cast<block_data_t*>(qe->msg));
 
-				echo("Sending to %d with ETX %d",dest,gradient);
+				//printSendQueue();
+				echo("Sending message %s to %d ",qe->msg->payload(),dest);
 
 				//TODO: Implement callback to send_done event from RE
 				event_SubSend_sendDone(qe->msg, subsendResult);
-
-				//				subsendResult = db->command_Send_send(dest, qe->msg->dup()); // the duplicate will be sent via the dual buffer module. we keep a copy here that will be deleted fater the sendDone.
-				//				if (subsendResult == SUCCESS) { // CHECK -> OK
-				//					// Successfully submitted to the data-link layer.
-				//					return;
-				//				} else if (subsendResult == EOFF) { // NOT CHECKED
-				//					// The radio has been turned off underneath us. Assume that
-				//					// this is for the best. When the radio is turned back on, we'll
-				//					// handle a startDone event and resume sending.
-				//					radioOn = false;
-				//					emit(registerSignal("CfeTxDroppedRadioOff"), self);
-				//					trace() << "sendTask - Subsend failed from EOFF.";
-				//				} else if (subsendResult == EBUSY) { // CHECKED -> OK
-				//					// This shouldn't happen, as we sit on top of a client and
-				//					// control our own output; it means we're trying to
-				//					// double-send (bug). This means we expect a sendDone, so just
-				//					// wait for that: when the sendDone comes in, // we'll try
-				//					// sending this packet again.
-				//					emit(registerSignal("CfeTxDroppedRadioEbusy"), self);
-				//					trace() << "sendTask - Subsend failed from EBUSY";
-				//					// this condition might happen when a "route found" is signaled from the RE and a ReTxTimer is running:
-				//					// the first event calls a post sendTask(), if the ReTxTimer fires before the sendDone, the sending flag is set to false and a new sendTask is called.
-				//					// It's rare but it happens during loops, in particular when the current parent may select ourselves as parent (check updateRouteTask in RE)
-				//					// Is it a bug of CTP or of my implementation?
-				//
-				//				} else if (subsendResult == ESIZE) {
-				//					post_sendTask();
-				//				}
 			}
 		}
 
@@ -950,6 +953,26 @@ namespace wiselib {
 		fe_queue_entry_t* command_SendQueue_head() {
 			return sendqueue.front();
 		}
+
+		void printSendQueue() {
+			SendQueue bkpQueue;
+			fe_queue_entry_t* temp;
+
+			echo("SendQueue: ");
+
+			while (sendqueue.size() != 0) {
+				temp=sendqueue.front();
+				bkpQueue.push(sendqueue.front());
+				sendqueue.pop();
+
+				echo("msg = %s, retries = %d, seqno = %d",temp->msg->payload(),temp->retries,temp->msg->seqno());
+			}
+
+			while (bkpQueue.size() != 0) {
+				sendqueue.push(bkpQueue.front());
+				bkpQueue.pop();
+			}
+		}
 		// ------------------------------------------------------------------------
 
 		void command_SentCache_insert(DataMessage* pkt) {
@@ -961,14 +984,24 @@ namespace wiselib {
 			sentCache.push_back(pkt);
 		}
 
-		bool command_SentCache_lookup(DataMessage* pkt) {
+		cache_lookup_result_t command_SentCache_lookup(DataMessage* pkt) {
 			int size = sentCache.size();
 			for (int i = 0; i < size; i++) {
 				if (command_CtpPacket_matchInstance(pkt, sentCache[i])) {
-					return true;
+					return FULL_MATCH;
+				} else if ((pkt->origin() == sentCache[i]->origin())&&(pkt->seqno() == sentCache[i]->seqno())) {
+					return PARTIAL_MATCH;
 				}
 			}
-			return false;
+			return NO_MATCH;
+		}
+
+		void printSentCache() {
+			int size = sentCache.size();
+			echo("SentCache: ");
+			for (int i = 0; i < size; i++) {
+				echo("message: %s, origin = %d, thl = %d, seqno = %d",sentCache[i]->payload(),sentCache[i]->origin(),sentCache[i]->thl(),sentCache[i]->seqno());				
+			}
 		}
 	}
 	;
