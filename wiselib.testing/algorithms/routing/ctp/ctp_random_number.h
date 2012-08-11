@@ -98,7 +98,7 @@ there is no need for the MOD operator.
 			clock_ = &clock;
 
 			//Chose a default seed
-			srand(clock_->milliseconds(clock_->time()* (3 * radio_->id() + 2)) );
+			srand(clock_->milliseconds(clock_->time())* (3 * radio_->id() + 2) );
 
 			return SUCCESS;
 		}
@@ -117,14 +117,14 @@ there is no need for the MOD operator.
 
 		// -----------------------------------------------------------------------
 
-		/* Functions for generating different types of random data */ 
+		/* Functions for generating different types of random data */
 
 
 	      ///@name Other Data Types
       ///@{
 		unsigned long randLong(unsigned long limit = ULONG_MAX)
 		{
-			unsigned long iOutput;
+			unsigned long iOutput=0;
 			unsigned long iTemp;
 			int i;
 			//I only want to take the top two bits
@@ -145,7 +145,7 @@ there is no need for the MOD operator.
 
 		unsigned short int randShort(unsigned short limit = USHRT_MAX)
 		{
-			unsigned short int iOutput;
+			unsigned short int iOutput=0;
 			unsigned long iTemp;
 			int i;
 			//No need to limit ourselves...
@@ -163,7 +163,7 @@ there is no need for the MOD operator.
 
 		unsigned char randChar(unsigned char limit = CHAR_MAX)
 		{
-			unsigned char cOutput;
+			unsigned char cOutput=0;
 			unsigned long iTemp;
 			int i;
 			for(i=0; i<4; i++)
@@ -181,7 +181,7 @@ there is no need for the MOD operator.
 		bool randBit()
 		{
 			iCurrent_ = (MACRO_A * iCurrent_ + 1);
-			return (iCurrent_ >> 31) == 0;	 
+			return (iCurrent_ >> 31) == 0;
 		}
 		///@}
 		// -----------------------------------------------------------------------

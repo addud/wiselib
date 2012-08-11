@@ -89,8 +89,9 @@ public:
 
 		if (radio_->id() == wiselib::nodes[3]) {
 			timer_->set_timer<CtpTest, &CtpTest::start>(12000, this, 0);
-			timer_->set_timer<CtpTest, &CtpTest::change_link>(30000, this, 0);
 		}
+
+		timer_->set_timer<CtpTest, &CtpTest::change_link>(30000, this, 0);
 
 		c='0';
 	}
