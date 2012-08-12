@@ -12,6 +12,7 @@
 #include "algorithms/routing/ctp/ctp_send_queue_value.h"
 #include "internal_interface/routing_table/routing_table_static_array.h"
 #include "util/base_classes/routing_base.h"
+#include "util/base_classes/uart_base.h"
 #include "util/pstl/queue_static.h"
 
 typedef wiselib::OSMODEL Os;
@@ -63,10 +64,8 @@ public:
 
 		  uart_->enable_serial_comm();
 
-		  //uart_->reg_read_callback<CtpTest, &CtpTest::receive_serial>( this );
+		  uart_->reg_read_callback<CtpTest, &CtpTest::receive_serial>( this );
 
-
-		//TODO: Send random_number_ by value
 		le_.init(*radio_, *timer_, *debug_, *clock_, random_number_);
 		le_.enable_radio();
 
@@ -112,7 +111,7 @@ public:
 	}
 
 	void change_link(void*) {
-		debug_->debug("Removing link\n");
+		debug_->debug("APP: Removing link\n");
 		wiselib::connections[0].etx=1000;
 	}
 
@@ -123,9 +122,23 @@ public:
 				radio_->id(), buf, from);
 	}
 
-   void receive_serial( size_t len, block_data_t *buf )
+   void receive_serial( Uart::size_t len, Uart::block_data_t *buf )
    {
-      debug_->debug( "UART: received len %i, message is '%s'\n", len, buf );
+
+	   debug_->debug("APP received serial message");
+	   if (len<3) {
+		   debug_->debug("APP: Unexpected serial message");
+		   return;
+	   }
+      debug_->debug( "APP: UART: received new ETX: n1 = 5d, n2 = %d, etx = 5d",buf[0],buf[1],buf[2] );
+
+#if defined CTP_DEBUGGING && defined DEBUG_ETX
+		wiselib::connections_t* link = wiselib::getConnection(buf[0], buf[1]);
+		if (link != NULL) {
+			link->etx=buf[2];
+		}
+#endif
+
       //uart_->write( len, (Uart::block_data_t*)buf );
    }
 
