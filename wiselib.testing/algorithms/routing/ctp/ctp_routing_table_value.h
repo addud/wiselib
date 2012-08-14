@@ -43,13 +43,12 @@ namespace wiselib {
 
 		node_id_t parent;
 		ctp_etx_t etx;
-		bool haveHeard;
 		bool congested;
 
 		// -----------------------------------------------------------------
 
 		CtpRoutingTableValue() :
-		parent(Radio_P::NULL_NODE_ID), etx(MAX_METRIC), haveHeard(false), congested(
+		parent(Radio_P::NULL_NODE_ID), etx(MAX_METRIC), congested(
 			false) {
 		}
 

@@ -25,6 +25,7 @@
 #define CTP_TESTING_H_
 
 #include "util/serialization/simple_types.h"
+#include <limits.h>
 
 //uncomment for debugging mode
 #define CTP_DEBUGGING
@@ -41,32 +42,32 @@
 //Uncomment to enable general LE debug messages
 //#define LINK_ESTIMATOR_DEBUG
 
-#define NODES_NR												8
-//#define NODES														{410,411,412,413,414,415,416,417} //tubs isense ids
-#define NODES														{406,407,408,409,417,418,419,420} // alternate tubs isense ids
-//#define NODES														{0,1,2,3,4,5,6,7} //Shawn ids
+#define NODES_NR			4
+//#define NODES				{410,411,412,413,414,415,416,417} //tubs isense ids
+//#define NODES				{418,419,420,421,422,424,426,427} // alternate tubs isense ids
+#define NODES				{0,1,2,3} //Shawn ids
 
 
 /* All these numbers represent indexes of the node IDs in the NODES list. */
 
-//#define CONNECTIONS_NR									8
-//#define CONNECTIONS 								{{0,1,1},{1,2,1},{2,3,1},{3,4,1},{4,5,1},{5,6,1},{6,7,1},{7,0,1}}
+//#define LINKS_NR			8
+//#define LINKS 			{{0,1,1},{1,2,1},{2,3,1},{3,4,1},{4,5,1},{5,6,1},{6,7,1},{7,0,1}}
 
-#define CONNECTIONS_NR									5
-#define CONNECTIONS 								{{0,1,1},{1,2,1},{1,3,100},{2,3,1},{3,0,100}}
+#define LINKS_NR			4
+#define LINKS 				{{0,1,20},{0,2,19},{3,1,20},{3,2,40}}
 
+#define SENDER_NODES_NR		1
+#define SENDER_NODES		{3}
 
 //Nodes acting as roots/sinks
-#define ROOT_NODES_NR 									1
-#define ROOT_NODES 											{0}
+#define ROOT_NODES_NR 		1
+#define ROOT_NODES 			{0}
 
 //Node indexes we want to print debug messages on
-//#define DEBUG_NODES_NR 									8
-//#define DEBUG_NODES										{0,1,2,3,4,5,6,7}
-
-#define DEBUG_NODES_NR 									1
-#define DEBUG_NODES										{3}
-
+//#define DEBUG_NODES			{0,1,2,3,4,5,6,7}
+//#define DEBUG_NODES_NR 		8
+#define DEBUG_NODES		{3}
+#define DEBUG_NODES_NR 	1
 
 namespace wiselib {
 
@@ -74,28 +75,41 @@ typedef struct {
 	uint16_t n1;
 	uint16_t n2;
 	ctp_etx_t etx;
-} connections_t;
+} links_t;
 
 const uint16_t nodes[NODES_NR] = NODES;
+const uint16_t sender_nodes[SENDER_NODES_NR] = SENDER_NODES;
 const uint16_t root_nodes[ROOT_NODES_NR] = ROOT_NODES;
 const uint16_t debug_nodes[DEBUG_NODES_NR] = DEBUG_NODES;
 
-connections_t connections[CONNECTIONS_NR] = CONNECTIONS;
+links_t links[LINKS_NR] = LINKS;
 
-connections_t* getConnection(uint16_t n1, uint16_t n2) {
+links_t* getLink(uint16_t n1, uint16_t n2) {
 
 	int i;
 
-	for (i = 0; i < CONNECTIONS_NR; i++) {
-		if (((n1 == nodes[connections[i].n1])
-				&& (n2 == nodes[connections[i].n2]))
-				|| ((n1 == nodes[connections[i].n2])
-						&& (n2 == nodes[connections[i].n1]))) {
-			return &(connections[i]);
+	for (i = 0; i < LINKS_NR; i++) {
+		if (((n1 == nodes[links[i].n1])
+				&& (n2 == nodes[links[i].n2]))
+				|| ((n1 == nodes[links[i].n2])
+						&& (n2 == nodes[links[i].n1]))) {
+			return &(links[i]);
 		}
 	}
 
 	return NULL;
+}
+
+bool areConnected(uint16_t n1, uint16_t n2) {
+	links_t *link = getLink(n1,n2);
+
+	if (link!=NULL) {
+		if (link->etx < USHRT_MAX) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 }
