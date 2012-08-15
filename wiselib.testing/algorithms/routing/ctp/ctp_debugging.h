@@ -31,7 +31,7 @@
 #define CTP_DEBUGGING
 
 //uncomment to enable hardcoded link quality gradients
-#define DEBUG_ETX
+//#define DEBUG_ETX
 
 //Uncomment to enable general RE debug messages
 //#define FORWARDING_ENGINE_DEBUG
@@ -54,7 +54,7 @@
 //#define LINKS 			{{0,1,1},{1,2,1},{2,3,1},{3,4,1},{4,5,1},{5,6,1},{6,7,1},{7,0,1}}
 
 #define LINKS_NR			4
-#define LINKS 				{{0,1,20},{0,2,19},{3,1,20},{3,2,40}}
+#define LINKS 				{{0,1,1},{1,3,50},{2,3,20},{100,100,USHRT_MAX}}
 
 #define SENDER_NODES_NR		1
 #define SENDER_NODES		{3}

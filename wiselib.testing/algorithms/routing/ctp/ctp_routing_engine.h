@@ -29,8 +29,6 @@
 #include "algorithms/routing/ctp/ctp_types.h"
 #include "algorithms/routing/ctp/ctp_debugging.h"
 
-#define RE_MAX_EVENT_RECEIVERS  2
-
 namespace wiselib {
 
 	template<typename OsModel_P, typename LinkEstimator_P, typename Neigh_P,
@@ -40,6 +38,9 @@ namespace wiselib {
 		typename Clock_P = typename OsModel_P::Clock>
 	class CtpRoutingEngine : public BasicTopology<OsModel_P, Neigh_P, Radio_P, Timer_P>{
 	public:
+
+		static const char RE_MAX_EVENT_RECEIVERS = 2;
+
 		typedef OsModel_P OsModel;
 		typedef LinkEstimator_P LinkEstimator;
 		typedef RandomNumber_P RandomNumber;
@@ -75,6 +76,8 @@ namespace wiselib {
 		typedef typename TopologyCallbackVector::iterator TopologyCallbackVectorIterator;
 
 		// --------------------------------------------------------------------
+
+		
 
 		enum Events {
 			RE_EVENT_ROUTE_NOT_FOUND = 0, RE_EVENT_ROUTE_FOUND = 1
@@ -246,7 +249,12 @@ namespace wiselib {
 
 		void command_CtpInfo_triggerRouteUpdate() {
 			updateRouteTask();
+			//printRoutingTable();
 			resetInterval();
+		}
+
+		void command_CtpInfo_recomputeRoutes() {
+			updateRouteTask();
 		}
 
 
@@ -737,7 +745,8 @@ namespace wiselib {
 
 			//If minEtx < MAX_METRIC, it means that we have found a better neighbour
 			if (minEtx < MAX_METRIC) {
-
+				echo("Better neighbour found = %d",best->first);
+				printRoutingTable();
 				if (routeInfo.congested) {
 
 					echo("Parent congested, trying to solve: best = %d, parent = %d, bestEtx = %d < %d  ******",best->first,best->second.parent,best->second.etx, routeInfo.etx);
@@ -767,6 +776,7 @@ namespace wiselib {
 
 						echo("Updated route: parent = %d, congested = %d, etx = %d",routeInfo.parent,routeInfo.congested, routeInfo.etx);
 						//printRoutingTable();
+						
 				}
 			}
 
@@ -1088,8 +1098,8 @@ namespace wiselib {
 						entry.etx = etx;
 						routingTable[from] = entry;
 
-						/*echo("Added new entry %d",from);
-						printRoutingTable();*/
+						//echo("Added new entry %d",from);
+						//printRoutingTable();
 
 #ifdef ROUTING_ENGINE_DEBUG
 						echo("%d: ", self);

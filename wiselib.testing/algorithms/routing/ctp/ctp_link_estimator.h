@@ -30,8 +30,6 @@
 #include "algorithms/routing/ctp/ctp_types.h"
 #include "algorithms/routing/ctp/ctp_debugging.h"
 
-#define LE_MAX_EVENT_RECEIVERS		2
-
 namespace wiselib {
 
 	template<typename OsModel_P, typename Neigh_P, typename RandomNumber_P,
@@ -41,6 +39,9 @@ namespace wiselib {
 		typename Clock_P = typename OsModel_P::Clock>
 	class CtpLinkEstimator: public RadioBase<OsModel_P, typename Radio_P::node_id_t, typename Radio_P::size_t, typename Radio_P::block_data_t>{
 	public:
+
+		static const char LE_MAX_EVENT_RECEIVERS = 2;
+
 		typedef OsModel_P OsModel;
 		typedef RandomNumber_P RandomNumber;
 		typedef Neigh_P Neighbors;
@@ -233,14 +234,14 @@ namespace wiselib {
 		Neighbors &topology() {
 			return nt;
 		}		
-		
+
 		// ----------------------------------------------------------------------------------
 
 		template<void (*TMethod)(void)>
 		uint8_t reg_listener_callback(void) {
 
 			if (topology_callbacks_.empty())
-				topology_callbacks_.assign(RE_MAX_EVENT_RECEIVERS, topology_delegate_t());
+				topology_callbacks_.assign(LE_MAX_EVENT_RECEIVERS, topology_delegate_t());
 
 			for (TopologyCallbackVectorIterator it = topology_callbacks_.begin();
 				it != topology_callbacks_.end(); it++) {
@@ -300,13 +301,11 @@ namespace wiselib {
 #if defined CTP_DEBUGGING && defined DEBUG_ETX
 			links_t* link = getLink(self, neighbour);
 			if (link != NULL) {
-				if (link->etx < USHRT_MAX) {
-					return link->etx;
-				}
+				return link->etx;
+			} else {
+				return VERY_LARGE_EETX_VALUE;
 			}
 #endif
-
-			//print_neighbor_table();
 
 			NeighbourTableIterator it;
 			it = nt.find(neighbour);
@@ -413,11 +412,55 @@ namespace wiselib {
 
 		// -----------------------------------------------------------------------
 
-		// called when the parent changes; clear state about data-driven link quality
-		error_t command_LinkEstimator_clearDLQ(node_id_t neighbor) {
-			NeighbourTableIterator it;
 
-			it = nt.find(neighbor);
+		// called when an acknowledgement is received; 
+		// sign of a successful data transmission; 
+		// to update forward link quality
+		error_t command_LinkEstimator_txAck(node_id_t neighbor) {
+			neighbor_table_entry_t *ne;
+			NeighbourTableIterator it = nt.find(neighbor);
+
+			if (it != nt.end()) {
+
+				ne = &it->second;
+				ne->data_success++;
+				ne->data_total++;
+				if (ne->data_total >= DLQ_PKT_WINDOW) {
+					updateDEETX(ne);
+				}
+				return SUCCESS;
+			}
+			return ERR_UNSPEC;
+		}
+
+		// called when an acknowledgement is not received; 
+		// could be due to data pkt or acknowledgement loss
+		// to update forward link quality
+		error_t  command_LinkEstimator_txNoAck(node_id_t neighbor) {
+			neighbor_table_entry_t *ne;
+			NeighbourTableIterator it = nt.find(neighbor);
+
+			if (it != nt.end()) {
+
+				ne = &it->second;
+				ne->data_total++;
+				if (ne->data_total >= DLQ_PKT_WINDOW) {
+					updateDEETX(ne);
+					//echo("Update DEETX for neighbor %d",neighbor);
+				}
+				
+				//print_neighbor_table();
+
+				return SUCCESS;
+			}
+			return ERR_UNSPEC;
+		}
+
+		// called when the parent changes
+		// clear state about data-driven link quality
+		error_t command_LinkEstimator_clearDLQ(node_id_t neighbor) {
+
+			NeighbourTableIterator it =  nt.find(neighbor);
 
 			if (it != nt.end()) {
 				return ERR_UNSPEC;
@@ -691,8 +734,9 @@ namespace wiselib {
 #ifdef LINK_ESTIMATOR_DEBUG
 					echo("Found the entry so updating");
 #endif
-					//			echo("neighbour %d  found.  updating", ll_addr);
+					//echo("neighbour %d  found.  updating", ll_addr);
 					updateNeighbourEntry(it, msg->seqno());
+					//print_neighbor_table();
 				} else {
 					//			echo("neighbour %d not found", ll_addr);
 
@@ -910,7 +954,24 @@ namespace wiselib {
 
 		// ----------------------------------------------------------------------------------
 
-		//TODO: updateDEETX (Data driven ETX) when TX acknowledged
+		// update data driven EETX
+		void updateDEETX(neighbor_table_entry_t *ne) {
+			ctp_etx_t estETX;
+
+			if (ne->data_success == 0) {
+				// if there were no successful packet transmission in the
+				// last window, our current estimate is the number of failed
+				// transmissions
+				estETX = (ne->data_total - 1)* 10;
+			} else {
+				estETX = (10 * ne->data_total) / ne->data_success - 10;
+				ne->data_success = 0;
+				ne->data_total = 0;
+			}
+			updateEETX(ne, estETX);
+		}
+
+		// ----------------------------------------------------------------------------------
 
 		// EETX (Extra Expected number of Transmission)
 		// EETX = ETX - 1
@@ -933,7 +994,7 @@ namespace wiselib {
 		// update the inbound link quality by
 		// munging receive, fail count since last update
 		void updateNeighborTableEst(NeighbourTableIterator it) {
-			
+
 			uint8_t totalPkt;
 			NeighbourTableValue *ne;
 			uint8_t newEst;
@@ -1020,7 +1081,7 @@ namespace wiselib {
 			echo("Neighbour table");
 			for (it = nt.begin(); it != nt.end(); it++) {
 				ne = &it->second;
-				echo("neighbour = %d, flags = %d, INIT = %u, PINNED = %u, MATURE = %u, VALID = %u",it->first, ne->flags,ne->flags & INIT_ENTRY,ne->flags & PINNED_ENTRY,ne->flags & MATURE_ENTRY,ne->flags & VALID_ENTRY);
+				echo("neighbour = %d, flags = %d, INIT = %u, PINNED = %u, MATURE = %u, VALID = %u, etx = %d",it->first, ne->flags,ne->flags & INIT_ENTRY,ne->flags & PINNED_ENTRY,ne->flags & MATURE_ENTRY,ne->flags & VALID_ENTRY,ne->eetx);
 			}
 		}
 

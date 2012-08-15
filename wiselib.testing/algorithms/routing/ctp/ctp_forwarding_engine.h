@@ -27,13 +27,14 @@
 #include "util/base_classes/routing_base.h"
 #include "algorithms/routing/ctp/ctp_forwarding_engine_msg.h"
 #include "algorithms/routing/ctp/ctp_types.h"
+#include "algorithms/routing/ctp/ctp_ack_msg.h"
 #include "algorithms/routing/ctp/ctp_debugging.h"
 
 namespace wiselib {
 
 	template<typename OsModel_P, typename DataMessage_P, typename SendQueueValue_P,
 		typename SendQueue_P, typename EntryPool_P, typename MessagePool_P,
-		typename SentCache_P, typename RandomNumber_P, typename RoutingEngine_P,
+		typename SentCache_P, typename RandomNumber_P, typename RoutingEngine_P, typename LinkEstimator_P,
 		typename Radio_P = typename OsModel_P::Radio,
 		typename Timer_P = typename OsModel_P::Timer,
 		typename Debug_P = typename OsModel_P::Debug,
@@ -49,6 +50,7 @@ namespace wiselib {
 		typedef SentCache_P SentCache;
 		typedef RandomNumber_P RandomNumber;
 		typedef RoutingEngine_P RoutingEngine;
+		typedef LinkEstimator_P LinkEstimator;
 		typedef Radio_P Radio;
 		typedef Timer_P Timer;
 		typedef Debug_P Debug;
@@ -66,9 +68,11 @@ namespace wiselib {
 		typedef typename SentCache::iterator SentCacheIterator;
 
 		typedef CtpForwardingEngine<OsModel, DataMessage, SendQueueValue, SendQueue,
-			EntryPool, MessagePool, SentCache, RandomNumber, RoutingEngine,
+			EntryPool, MessagePool, SentCache, RandomNumber, RoutingEngine, LinkEstimator,
 			Radio, Timer, Debug> self_type;
 		typedef self_type* self_pointer_t;
+
+		typedef CtpAckMsg<OsModel,Radio> AckMsg; 
 
 		typedef delegate3<void, node_id_t, size_t, block_data_t*> radio_delegate_t;
 		typedef vector_static<OsModel, radio_delegate_t, RADIO_BASE_MAX_RECEIVERS> RecvCallbackVector;
@@ -147,13 +151,14 @@ namespace wiselib {
 		// --------------------------------------------------------------------
 
 		int init(Radio& radio, Timer& timer, Debug& debug, Clock& clock,
-			RandomNumber& random_number, RoutingEngine& re) {
+			RandomNumber& random_number, RoutingEngine& re, LinkEstimator& le) {
 				radio_ = &radio;
 				timer_ = &timer;
 				debug_ = &debug;
 				clock_ = &clock;
 				random_number_ = &random_number;
 				cre = &re;
+				le_ = &le;
 
 				init_variables();
 
@@ -223,9 +228,9 @@ namespace wiselib {
 
 			return -1;
 		}
-		
+
 		// --------------------------------------------------------------------
-		
+
 		int unreg_recv_callback(int idx) {
 			recv_callbacks_.at(idx) = radio_delegate_t();
 			return SUCCESS;
@@ -248,7 +253,11 @@ namespace wiselib {
 	private:
 
 		enum {
-			MAX_RETRIES = 30
+#ifdef SHAWN
+			MAX_RETRIES = 10
+#else
+			MAX_RETRIES = 10
+#endif
 		};
 
 		enum TimerPeriods {
@@ -263,7 +272,7 @@ namespace wiselib {
 			SENDDONE_OK_WINDOW = SENDDONE_OK_OFFSET - 1,
 			CONGESTED_WAIT_OFFSET = FORWARD_PACKET_TIME << 2,
 			CONGESTED_WAIT_WINDOW = CONGESTED_WAIT_OFFSET - 1,
-			RETX_PERIOD = 10000 //ms
+			RETX_PERIOD = 5000 //ms
 		};
 
 		// --------------------------------------------------------------------
@@ -298,8 +307,6 @@ namespace wiselib {
 		uint8_t congestionThreshold;
 		bool running;
 		bool radioOn;
-		bool ackPending;
-		bool sending;
 		node_id_t lastParent;
 		uint8_t seqno;
 
@@ -320,6 +327,7 @@ namespace wiselib {
 		SentCache sentCache;
 
 		typename RoutingEngine::self_pointer_t cre;
+		typename LinkEstimator::self_pointer_t le_;
 
 		// Node own ID
 		node_id_t self;
@@ -365,8 +373,6 @@ namespace wiselib {
 			sendTaskTimerIsRunning=false;
 
 			running = false;
-			ackPending = false;
-			sending = false;
 
 			congestionThreshold = command_SendQueue_maxSize() >> 1;
 			lastParent = NULL_NODE_ID; //last parent we sent to
@@ -526,6 +532,103 @@ namespace wiselib {
 			return SUCCESS;
 		}
 
+
+		/*
+		* Received a message to forward. Check whether it is a duplicate by
+		* checking the packets currently in the queue as well as the
+		* send history cache (in case we recently forwarded this packet).
+		* The cache is important as nodes immediately forward packets
+		* but wait a period before retransmitting.
+		* If this node is a root, signal receive.
+		*/
+		void receive(node_id_t from, size_t len, block_data_t *data) {
+
+			if (!running || from == radio().id()) {
+				return;
+			}
+
+#ifdef CTP_DEBUGGING
+			if (!areConnected(self, from)) {
+				return;
+			}
+#endif
+
+			message_id_t msg_id = read<OsModel, block_data_t, message_id_t>(data);
+
+			if (msg_id == CtpAckMsgId) {
+
+				process_ack_message(from,data);
+
+			} else if (msg_id == CtpDataMsgId) {
+
+				DataMessage* msg = reinterpret_cast<DataMessage*>(data);
+				cache_lookup_result_t cacheResult;
+
+				//echo("Received msg %s from %d",msg->payload(),from);
+
+				fe_queue_entry_t* qe;
+				uint8_t i, thl;
+
+				// Update the THL here, since it has lived another hop, and so
+				// that the root sees the correct THL.
+				thl = msg->thl();
+				thl++;
+				msg->set_thl(thl);
+
+				//echo("Received msg = %s, origin = %d, seqno = %d, thl = %d, etx = %d, from %d",msg->payload(), msg->origin(),msg->seqno(),msg->thl(),msg->etx(),from);
+				//printSentCache();
+
+				//See if we remember having seen this packet
+				//We look in the sent cache ...
+				cacheResult = command_SentCache_lookup(msg);
+				if (cacheResult == FULL_MATCH) {
+					//Message instance duplicate -> discard
+					echo("Discarding duplicate sentCache msg = %s, seqno = %d, thl = %d from %d",
+						msg->payload(), msg->seqno(), msg->thl(), from);
+					return;
+				} else if (cacheResult == PARTIAL_MATCH) {
+					//The message has passed through the node before
+					//It is floating around waiting for a route to be found
+					//Speed up the process by forcing the RE to recompute routes
+					cre->command_CtpInfo_triggerRouteUpdate();
+				}
+
+				//... and in the queue for duplicates
+				if (command_SendQueue_size() > 0) {
+					for (i = command_SendQueue_size(); --i;) {
+						qe = command_SendQueue_element(i);
+						if (command_CtpPacket_matchInstance(qe->msg, msg)) {
+							//Message instance duplicate -> discard
+							echo("Discarding duplicate sendQueue msg = %s, seqno = %d, thl = %d from %d",
+								msg->payload(), msg->seqno(), msg->thl(), from);
+							return;
+						}
+					}
+				}
+
+				//Send back ack msg
+				AckMsg ack_msg(CtpAckMsgId);
+				ack_msg.set_origin(msg->origin());
+				ack_msg.set_seqno(msg->seqno());
+
+				radio().send(from,AckMsg::HEADER_SIZE,reinterpret_cast<block_data_t*>(&ack_msg));
+
+				echo("sending ack to %d",from);
+
+				if (cre->command_RootControl_isRoot()) {
+
+					// If I'm the root, signal receive.
+					notify_receivers(from, len - DataMessage::HEADER_SIZE,
+						msg->payload());
+					return;
+
+				} else {
+					forward(len, msg);
+				}
+			}
+		}
+
+
 		/*
 		* Function for preparing a packet for forwarding. Performs
 		* a buffer swap from the message pool. If there are no free
@@ -581,92 +684,39 @@ namespace wiselib {
 			}
 		}
 
-		/*
-		* Received a message to forward. Check whether it is a duplicate by
-		* checking the packets currently in the queue as well as the
-		* send history cache (in case we recently forwarded this packet).
-		* The cache is important as nodes immediately forward packets
-		* but wait a period before retransmitting.
-		* If this node is a root, signal receive.
-		*/
-		void receive(node_id_t from, size_t len, block_data_t *data) {
+		// ----------------------------------------------------------------------------------
 
-			if (!running) {
-				return;
-			}
+		void process_ack_message(node_id_t from, block_data_t *msg) {
 
-			if (from == radio().id()) {
-				return;
-			}
+			echo("Received ack from %d",from);
 
-#ifdef CTP_DEBUGGING
-			if (!areConnected(self, from)) {
-				return;
-			}
-#endif
+			if (!command_SendQueue_empty() && msg!=NULL) {
 
-			DataMessage* msg = reinterpret_cast<DataMessage*>(data);
-			cache_lookup_result_t cacheResult;
+				SendQueueValue *qe = command_SendQueue_head();
+				AckMsg* ack_msg = reinterpret_cast<AckMsg*>(msg);
 
-			if (msg->msg_id() != CtpDataMsgId) {
-				return;
-			}
+				if (qe == NULL) {
+					echo("BUG: this should never happen");
+					return;
+				}
 
-			//echo("Received msg %s from %d",msg->payload(),from);
+				
 
-			bool duplicate = false;
-			fe_queue_entry_t* qe;
-			uint8_t i, thl;
+				if (qe->msg->origin() == ack_msg->origin() && qe->msg->seqno()==qe->msg->seqno()) { 
 
-			// Update the THL here, since it has lived another hop, and so
-			// that the root sees the correct THL.
-			thl = msg->thl();
-			thl++;
-			msg->set_thl(thl);
+					// Packet successfully txmitted
 
-			//echo("Received msg = %s, origin = %d, seqno = %d, thl = %d, etx = %d, from %d",msg->payload(), msg->origin(),msg->seqno(),msg->thl(),msg->etx(),from);
-			//printSentCache();
+					
 
-			//See if we remember having seen this packet
-			//We look in the sent cache ...
-			cacheResult = command_SentCache_lookup(msg);
-			if (cacheResult == FULL_MATCH) {
-				//Message instance duplicate -> discard
-				echo("Discarding duplicate msg = %s, seqno = %d, thl = %d from %d",
-					msg->payload(), msg->seqno(), msg->thl(), from);
-				return;
-			} else if (cacheResult == PARTIAL_MATCH) {
-				//The message has passed through the node before
-				//It is floating around waiting for a route to be found
-				//Speed up the process by forcing the RE to recompute routes
-				cre->command_CtpInfo_triggerRouteUpdate();
-			}
-
-			//... and in the queue for duplicates
-			if (command_SendQueue_size() > 0) {
-				for (i = command_SendQueue_size(); --i;) {
-					qe = command_SendQueue_element(i);
-					if (command_CtpPacket_matchInstance(qe->msg, msg)) {
-						duplicate = true;
-						break;
-					}
+					le_->command_LinkEstimator_txAck(cre->command_Routing_nextHop());
+					command_SentCache_insert(qe->msg);
+					command_SendQueue_dequeue();
 				}
 			}
 
-			if (duplicate) {
-				return;
-			}
 
-			// If I'm the root, signal receive.
-			else if (cre->command_RootControl_isRoot()) {
-				// sends the packet to application layer.
-				notify_receivers(from, len - DataMessage::HEADER_SIZE,
-					msg->payload());
-				return;
-			} else {
-				forward(len, msg);
-			}
 		}
+
 
 		// ----------------------------------------------------------------------------------
 
@@ -685,7 +735,6 @@ namespace wiselib {
 		}
 
 		void event_RetxmitTimer_fired() {
-			sending = false;
 			post_sendTask();
 		}
 
@@ -764,18 +813,23 @@ namespace wiselib {
 		// ----------------------------------------------------------------------------------
 
 		void sendTask() {
-			if (sending) { // NOT CHECKED
-				return;
-			} else if (command_SendQueue_empty()) { // CHECK -> OK: when queue empty do nothing.
-				return;
-			} else if (!cre->command_RootControl_isRoot()
-				&& !cre->command_Routing_hasRoute()) { // CHECK -> OK: retx called after 10 sec.
-					echo("No route available. retry after 10s");
-					if (!reTxTimerIsRunning) {
-						setTimer((void*) RETXTIMER, RETX_PERIOD);
-					}
 
-					return;
+			if (command_SendQueue_empty()) { 
+				// When queue empty do nothing.
+				return;
+			} 
+
+			if (!cre->command_RootControl_isRoot() && !cre->command_Routing_hasRoute()) { 
+
+				// retx called 
+
+				echo("No route available. retry after 10s");
+				if (!reTxTimerIsRunning) {
+					setTimer((void*) RETXTIMER, RETX_PERIOD);
+				}
+
+				return;
+
 			} else {
 
 				error_t subsendResult;
@@ -814,8 +868,6 @@ namespace wiselib {
 
 				if (cre->command_RootControl_isRoot()) { // CHECK -> OK: loppbacked message to app layer.
 
-					ackPending = false;
-
 					fe_queue_entry_t* entry = command_SendQueue_head();
 
 					notify_receivers(self, entry->len, entry->msg->payload());
@@ -836,8 +888,6 @@ namespace wiselib {
 
 				qe->msg->set_etx(gradient);
 
-				ackPending = true;
-
 				// Set or clear the congestion bit on *outgoing* packets.
 				if (command_CtpCongestion_isCongested()) {
 					echo("I am congested");
@@ -852,64 +902,65 @@ namespace wiselib {
 				//printSendQueue();
 				echo("Sending message %s to %d ", qe->msg->payload(), dest);
 
-				//TODO: Implement callback to send_done event from RE
-				event_SubSend_sendDone(qe->msg, subsendResult);
-			}
-		}
 
-		/*
-		* The second phase of a send operation; based on whether the transmission was
-		* successful, the ForwardingEngine either stops sending or starts the
-		* RetxmitTimer with an interval based on what has occured. If the send was
-		* successful or the maximum number of retransmissions has been reached, then
-		* the ForwardingEngine dequeues the current packet. If the packet is from the
-		* application it signals Send.sendDone(); if it is a forwarded packet it returns
-		* the packet and queue entry to their respective pools.
-		*
-		*/
+				/*
+				* The second phase of a send operation; based on whether the transmission was
+				* successful, the ForwardingEngine either stops sending or starts the
+				* RetxmitTimer with an interval based on what has occured. If the send was
+				* successful or the maximum number of retransmissions has been reached, then
+				* the ForwardingEngine dequeues the current packet. If the packet is from the
+				* application it signals Send.sendDone(); if it is a forwarded packet it returns
+				* the packet and queue entry to their respective pools.
+				*
+				*/
 
-		void event_SubSend_sendDone(DataMessage* msg, error_t error) {
+				if (subsendResult != SUCCESS) { // NOT CHECKED
+					// Immediate retransmission is the worst thing to do.
+					echo("SubSend.sendDone - Send failed");
+					startRetxmitTimer(SENDDONE_FAIL_WINDOW, SENDDONE_FAIL_OFFSET);
 
-			if (command_SendQueue_empty()) {
-				echo("send queue is empty");
-			}
-			fe_queue_entry_t *qe = command_SendQueue_head();
-			if (qe == NULL /*|| qe->msg != msg*/) { // cannot check the pointer since I dup the message
-				echo("BUG: this should never happen");
-			} else if (error != SUCCESS) { // NOT CHECKED
-				// Immediate retransmission is the worst thing to do.
-				echo("SubSend.sendDone - Send failed");
-				startRetxmitTimer(SENDDONE_FAIL_WINDOW, SENDDONE_FAIL_OFFSET);
+				} else {
 
-				//TODO: this is based on message ack, which I haven't implemented under the LE radio yet
-				//must take care of this after implementing msg acking
-			} else if (ackPending
-				&& !command_PacketAcknowledgements_wasAcked(msg)) { // CHECK -> OK: see inner statements
-					// AckPending is for case when DL cannot support acks.
+					if (qe->retries-- == MAX_RETRIES) { 
 
-					//TODO: Add when implemented acking
-					//			le->command_LinkEstimator_txNoAck();
-					cre->command_CtpInfo_triggerRouteUpdate();
-					if (--qe->retries) { // CHECK -> OK: packet retxmitted after SENDDONE_NOACK_WINDOW.
+						//First time we're sending this message
+#ifdef SHAWN
+						if (!reTxTimerIsRunning) {
+							setTimer((void*) RETXTIMER, 2200);
+						}
+#else
+						startRetxmitTimer(SENDDONE_OK_WINDOW, SENDDONE_OK_OFFSET);	
+#endif
+					} else if (qe->retries > 0) { 
+
+						//Have tried to send this message before but didn't receive any ack
+
+						le_->command_LinkEstimator_txNoAck(dest);
+						cre->command_CtpInfo_triggerRouteUpdate();
+
 						echo("SubSend.sendDone - not acked.");
+
+#ifdef SHAWN
+						if (!reTxTimerIsRunning) {
+							setTimer((void*) RETXTIMER, 2200);
+						}
+#else
 						startRetxmitTimer(SENDDONE_NOACK_WINDOW, SENDDONE_NOACK_OFFSET);
-					} else { // CHECK -> OK: see inner statements
-						//max retries, dropping packet
+#endif
+					} else {
+
+						//Max retries, message wasn't acked
+
 						echo("Tx Dropped - max retries");
 
 						command_SendQueue_dequeue();
-						sending = false;
+						cre->command_CtpInfo_triggerRouteUpdate();
+
 						startRetxmitTimer(SENDDONE_OK_WINDOW, SENDDONE_OK_OFFSET);
+
 					}
-			} else { // CHECK -> OK: packet successfully txmitted and removed from queue.
 
-				//TODO: Enable acking when implemented
-				//			le->command_LinkEstimator_txAck(command_AMPacket_destination(msg));
-				command_SentCache_insert(qe->msg);
-				command_SendQueue_dequeue();
-				sending = false;
-
-				startRetxmitTimer(SENDDONE_OK_WINDOW, SENDDONE_OK_OFFSET);
+				}
 			}
 		}
 		// ----------------------------------------------------------------------------------

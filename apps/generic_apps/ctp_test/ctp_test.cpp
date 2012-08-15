@@ -45,7 +45,7 @@ typedef wiselib::queue_static<Os, DataMessage, 13> MessagePool;
 //TODO: Check sentCache for pointers to local variables
 typedef wiselib::vector_static<Os, DataMessage*, 4> SentCache;
 typedef wiselib::CtpForwardingEngine<Os, DataMessage, SendQueueValue, SendQueue,
-	EntryPool, MessagePool, SentCache, RandomNumber, RoutingEngine, Radio> ForwardingEngine;
+	EntryPool, MessagePool, SentCache, RandomNumber, RoutingEngine, LinkEstimator, Radio> ForwardingEngine;
 
 class CtpTest {
 
@@ -73,7 +73,7 @@ public:
 		re_.init(le_, *timer_, *debug_, *clock_, random_number_, le_);
 		re_.enable();
 
-		fe_.init(*radio_, *timer_, *debug_, *clock_, random_number_, re_);
+		fe_.init(*radio_, *timer_, *debug_, *clock_, random_number_, re_,le_);
 		fe_.enable_radio();
 
 		for (int i = 0; i < ROOT_NODES_NR; i++) {
@@ -90,11 +90,11 @@ public:
 		for (int i=0;i<SENDER_NODES_NR;i++) {
 
 			if (radio_->id() == wiselib::nodes[wiselib::sender_nodes[i]]) {
-				timer_->set_timer<CtpTest, &CtpTest::start>(3000, this, 0);
+				timer_->set_timer<CtpTest, &CtpTest::start>(5000, this, 0);
 			}
 		}
 
-		//timer_->set_timer<CtpTest, &CtpTest::first_change>(20000, this, 0);
+		timer_->set_timer<CtpTest, &CtpTest::first_change>(20000, this, 0);
 
 		c='0';
 	}
@@ -111,7 +111,7 @@ public:
 		fe_.send(Radio::BROADCAST_ADDRESS, sizeof(message), message);
 
 		// following can be used for periodic messages to sink
-		timer_->set_timer < CtpTest, &CtpTest::start > (500, this, 0);
+		timer_->set_timer < CtpTest, &CtpTest::start > (5000, this, 0);
 	}
 
 	void change_link(node_id_t n1, node_id_t n2, uint16_t etx) {
@@ -119,8 +119,8 @@ public:
 //#if defined CTP_DEBUGGING && defined DEBUG_ETX
 		wiselib::links_t* link = wiselib::getLink(n1, n2);
 		if (link != NULL) {
+			debug_->debug("%d: APP: Link %d - %d changed from %d to %d\n",radio_->id(),n1,n2,link->etx, etx);
 			link->etx = etx;
-			debug_->debug("APP: Link %d - %d changed to %d\n",n1,n2, etx);
 		}
 //#endif
 	}
@@ -149,13 +149,20 @@ public:
 
 	void first_change(void*) {
 		debug_->debug("%d: APP First Change\n",radio_->id());
-		change_link(1,3,USHRT_MAX);
-		timer_->set_timer < CtpTest, &CtpTest::second_change > (20000, this, 0);
+		wiselib::links_t* link = &wiselib::links[1];
+		link->n1=100;
+		link->n2=100;
+		link->etx=USHRT_MAX;
+
+		timer_->set_timer < CtpTest, &CtpTest::second_change > (40000, this, 0);
 	}
 
 	void second_change(void*) {
 		debug_->debug("%d: APP: Second Change\n",radio_->id());
-		change_link(1,2,60);
+		wiselib::links_t* link = &wiselib::links[3];
+		link->n1=2;
+		link->n2=0;
+		link->etx=60;
 		//timer_->set_timer < CtpTest, &CtpTest::second_change > (20000, this, 0);
 	}
 
