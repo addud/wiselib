@@ -34,7 +34,7 @@ namespace wiselib {
 
 	template<typename OsModel_P, typename DataMessage_P, typename SendQueueValue_P,
 		typename SendQueue_P, typename EntryPool_P, typename MessagePool_P,
-		typename SentCache_P, typename RandomNumber_P, typename RoutingEngine_P, typename LinkEstimator_P,
+		typename SentCache_P, typename RandomNumber_P, typename RoutingEngine_P, typename LinkEstimator_P, 
 		typename Radio_P = typename OsModel_P::Radio,
 		typename Timer_P = typename OsModel_P::Timer,
 		typename Debug_P = typename OsModel_P::Debug,
@@ -256,7 +256,7 @@ namespace wiselib {
 #ifdef SHAWN
 			MAX_RETRIES = 10
 #else
-			MAX_RETRIES = 10
+			MAX_RETRIES = 30
 #endif
 		};
 
@@ -272,7 +272,7 @@ namespace wiselib {
 			SENDDONE_OK_WINDOW = SENDDONE_OK_OFFSET - 1,
 			CONGESTED_WAIT_OFFSET = FORWARD_PACKET_TIME << 2,
 			CONGESTED_WAIT_WINDOW = CONGESTED_WAIT_OFFSET - 1,
-			RETX_PERIOD = 5000 //ms
+			RETX_PERIOD = 10000 //ms
 		};
 
 		// --------------------------------------------------------------------
@@ -590,7 +590,7 @@ namespace wiselib {
 					//The message has passed through the node before
 					//It is floating around waiting for a route to be found
 					//Speed up the process by forcing the RE to recompute routes
-					cre->command_CtpInfo_triggerRouteUpdate();
+					cre->command_CtpInfo_recomputeRoutes();
 				}
 
 				//... and in the queue for duplicates
@@ -606,14 +606,18 @@ namespace wiselib {
 					}
 				}
 
+				if (msg->pull()) {
+					cre->command_CtpInfo_triggerRouteUpdate();
+				}
+
+				cre->command_CtpInfo_setNeighborCongested(from,msg->congestion());
+
 				//Send back ack msg
 				AckMsg ack_msg(CtpAckMsgId);
 				ack_msg.set_origin(msg->origin());
 				ack_msg.set_seqno(msg->seqno());
 
 				radio().send(from,AckMsg::HEADER_SIZE,reinterpret_cast<block_data_t*>(&ack_msg));
-
-				echo("sending ack to %d",from);
 
 				if (cre->command_RootControl_isRoot()) {
 
@@ -688,8 +692,6 @@ namespace wiselib {
 
 		void process_ack_message(node_id_t from, block_data_t *msg) {
 
-			echo("Received ack from %d",from);
-
 			if (!command_SendQueue_empty() && msg!=NULL) {
 
 				SendQueueValue *qe = command_SendQueue_head();
@@ -705,9 +707,7 @@ namespace wiselib {
 				if (qe->msg->origin() == ack_msg->origin() && qe->msg->seqno()==qe->msg->seqno()) { 
 
 					// Packet successfully txmitted
-
-					
-
+					//echo("Message %s was acked by %d",qe->msg->payload(),from);
 					le_->command_LinkEstimator_txAck(cre->command_Routing_nextHop());
 					command_SentCache_insert(qe->msg);
 					command_SendQueue_dequeue();
@@ -850,8 +850,7 @@ namespace wiselib {
 
 				// Once we are here, we have decided to send the packet.
 				if (command_SentCache_lookup(qe->msg) == FULL_MATCH) { // NOT CHECKED
-					command_SendQueue_dequeue();
-					echo("sendTask: Message found in the sent cache");
+					command_SendQueue_dequeue();					
 					//We must post the task instead of calling it directly
 					//to avoid infinite recursion
 					post_sendTask();
@@ -936,9 +935,9 @@ namespace wiselib {
 						//Have tried to send this message before but didn't receive any ack
 
 						le_->command_LinkEstimator_txNoAck(dest);
-						cre->command_CtpInfo_triggerRouteUpdate();
+						cre->command_CtpInfo_recomputeRoutes();
 
-						echo("SubSend.sendDone - not acked.");
+						//echo("Message %s not acked.",qe->msg->payload());
 
 #ifdef SHAWN
 						if (!reTxTimerIsRunning) {
@@ -951,9 +950,11 @@ namespace wiselib {
 
 						//Max retries, message wasn't acked
 
-						echo("Tx Dropped - max retries");
+						echo("Msg %s Dropped - max retries",qe->msg->payload());
 
 						command_SendQueue_dequeue();
+						command_SentCache_insert(qe->msg);
+
 						cre->command_CtpInfo_triggerRouteUpdate();
 
 						startRetxmitTimer(SENDDONE_OK_WINDOW, SENDDONE_OK_OFFSET);
@@ -965,7 +966,6 @@ namespace wiselib {
 		}
 		// ----------------------------------------------------------------------------------
 
-		//TODO: Implement data packet acknowledgement
 		bool command_PacketAcknowledgements_wasAcked(DataMessage *msg) {
 			//dummy
 			return true;
@@ -1060,10 +1060,10 @@ namespace wiselib {
 		// ------------------------------------------------------------------------
 
 		void command_SentCache_insert(DataMessage* pkt) {
+			//echo("Inserting %s into the sentCache",pkt->payload());
 			if (sentCache.size() == sentCache.max_size()) {
 				// remove the oldest element
-				SentCacheIterator eraseLocation = sentCache.begin();
-				sentCache.erase(eraseLocation);
+				sentCache.erase(sentCache.begin());
 			}
 			sentCache.push_back(pkt);
 		}
@@ -1072,6 +1072,8 @@ namespace wiselib {
 			int size = sentCache.size();
 			for (int i = 0; i < size; i++) {
 				if (command_CtpPacket_matchInstance(pkt, sentCache[i])) {
+					//echo("sendTask: Message %s with seqno=%d found in the sent cache",pkt->payload(),pkt->seqno());
+					printSentCache();
 					return FULL_MATCH;
 				} else if ((pkt->origin() == sentCache[i]->origin())
 					&& (pkt->seqno() == sentCache[i]->seqno())) {

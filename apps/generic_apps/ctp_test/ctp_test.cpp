@@ -26,23 +26,29 @@ typedef Radio::node_id_t node_id_t;
 typedef Radio::block_data_t block_data_t;
 
 typedef wiselib::CtpRoutingTableValue<Radio> RoutingTableValue;
+//This structure holds route information about a number of neighbours
 typedef wiselib::StaticArrayRoutingTable<Os, Radio, 10, RoutingTableValue> RoutingTable;
 typedef wiselib::CtpRandomNumber<Os> RandomNumber;
 
-
 typedef wiselib::CtpNeighbourTableValue<Radio>NeighbourTableValue;
+//This structure holds link quality information about a number of neighbours
 typedef wiselib::StaticArrayRoutingTable<Os, Radio, 10, NeighbourTableValue> NeighbourTable;
 typedef wiselib::CtpLinkEstimator<Os, NeighbourTable, RandomNumber, Radio> LinkEstimator;
 
-typedef wiselib::CtpRoutingEngine<Os, LinkEstimator, RoutingTable, RandomNumber,
+//The ECN_ENABLED parameter set to true enables the Explicit Congestion Notification in the RE
+//This deals with detecting congestion situations and balancing the traffic accordingly
+typedef wiselib::CtpRoutingEngine<Os, LinkEstimator, RoutingTable, RandomNumber,true,
 	LinkEstimator> RoutingEngine;
 
 typedef wiselib::CtpForwardingEngineMsg<Os, Radio> DataMessage;
 typedef wiselib::CtpSendQueueValue<Radio, DataMessage> SendQueueValue;
+//This is used as a buffer for the messages to be sent
 typedef wiselib::queue_static<Os, SendQueueValue*, 13> SendQueue;
+//This is used as a pool for pre-allocated memory locations for the entries Sendqueue
 typedef wiselib::queue_static<Os, SendQueueValue, 13> EntryPool;
+//This is used as a pool for pre-allocated memory locations for the messages in the Sendqueue
 typedef wiselib::queue_static<Os, DataMessage, 13> MessagePool;
-//TODO: Check sentCache for pointers to local variables
+//This cache stores the last few sent messages
 typedef wiselib::vector_static<Os, DataMessage*, 4> SentCache;
 typedef wiselib::CtpForwardingEngine<Os, DataMessage, SendQueueValue, SendQueue,
 	EntryPool, MessagePool, SentCache, RandomNumber, RoutingEngine, LinkEstimator, Radio> ForwardingEngine;
@@ -87,24 +93,24 @@ public:
 
 		fe_.reg_recv_callback<CtpTest, &CtpTest::receive_radio_message>(this);
 
+		//Start message sending from the senders
 		for (int i=0;i<SENDER_NODES_NR;i++) {
-
 			if (radio_->id() == wiselib::nodes[wiselib::sender_nodes[i]]) {
 				timer_->set_timer<CtpTest, &CtpTest::start>(5000, this, 0);
 			}
 		}
 
-		timer_->set_timer<CtpTest, &CtpTest::first_change>(20000, this, 0);
+		//timer_->set_timer<CtpTest, &CtpTest::first_change>(20000, this, 0);
 
 		c='0';
 	}
 	// --------------------------------------------------------------------
+
+	//Sends periodic messages
 	void start(void*) {
 		block_data_t message[] = " caca\0";
 
 		message[0] = c++;
-
-		//TODO: FiX: doesn't get back here after sending
 
 		debug_->debug("%d: APP sends message %s\n", radio_->id(), message);
 
@@ -114,15 +120,13 @@ public:
 		timer_->set_timer < CtpTest, &CtpTest::start > (5000, this, 0);
 	}
 
+	//Cheanges the quelity of one pre-defined link
 	void change_link(node_id_t n1, node_id_t n2, uint16_t etx) {
-
-//#if defined CTP_DEBUGGING && defined DEBUG_ETX
 		wiselib::links_t* link = wiselib::getLink(n1, n2);
 		if (link != NULL) {
 			debug_->debug("%d: APP: Link %d - %d changed from %d to %d\n",radio_->id(),n1,n2,link->etx, etx);
 			link->etx = etx;
 		}
-//#endif
 	}
 
 	// --------------------------------------------------------------------
@@ -147,6 +151,7 @@ public:
 		//uart_->write( len, (Uart::block_data_t*)buf );
 	}
 
+	//Changes in network topology used during tests
 	void first_change(void*) {
 		debug_->debug("%d: APP First Change\n",radio_->id());
 		wiselib::links_t* link = &wiselib::links[1];

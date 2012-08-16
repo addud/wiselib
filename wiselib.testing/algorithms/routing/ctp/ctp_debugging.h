@@ -66,8 +66,9 @@
 //Node indexes we want to print debug messages on
 //#define DEBUG_NODES			{0,1,2,3,4,5,6,7}
 //#define DEBUG_NODES_NR 		8
-#define DEBUG_NODES		{3}
-#define DEBUG_NODES_NR 	1
+#define DEBUG_NODES_NR 	4
+#define DEBUG_NODES		{0,1,2,3}
+
 
 namespace wiselib {
 

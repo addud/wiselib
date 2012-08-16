@@ -32,12 +32,15 @@
 namespace wiselib {
 
 	template<typename OsModel_P, typename LinkEstimator_P, typename Neigh_P,
-		typename RandomNumber_P, typename Radio_P = typename OsModel_P::Radio,
+		typename RandomNumber_P, bool ECN_ENABLED, typename Radio_P = typename OsModel_P::Radio,
 		typename Timer_P = typename OsModel_P::Timer,
 		typename Debug_P = typename OsModel_P::Debug,
 		typename Clock_P = typename OsModel_P::Clock>
 	class CtpRoutingEngine : public BasicTopology<OsModel_P, Neigh_P, Radio_P, Timer_P>{
 	public:
+
+		//The ECN_ENABLED parameter enables the Explicit Congestion Notification
+		//This deals with detecting congestion situations and balancing the traffic accordingly
 
 		static const char RE_MAX_EVENT_RECEIVERS = 2;
 
@@ -50,7 +53,7 @@ namespace wiselib {
 		typedef Debug_P Debug;
 		typedef Clock_P Clock;
 
-		typedef CtpRoutingEngine<OsModel, LinkEstimator, Neighbors, RandomNumber,
+		typedef CtpRoutingEngine<OsModel, LinkEstimator, Neighbors, RandomNumber,ECN_ENABLED,
 			Radio, Timer, Debug> self_type;
 		typedef self_type* self_pointer_t;
 
@@ -262,7 +265,7 @@ namespace wiselib {
 
 		bool command_CtpInfo_isNeighborCongested(node_id_t n) {
 			RoutingTableIterator it;
-			if ((ECNOff) || (n == INVALID_ADDR))
+			if ((!ECN_ENABLED) || (n == INVALID_ADDR))
 				return false;
 
 			it = routingTable.find(n);
@@ -274,13 +277,30 @@ namespace wiselib {
 
 		// --------------------------------------------------------------------
 
+		void command_CtpInfo_setNeighborCongested(node_id_t n, bool congested) {
+			RoutingTableIterator it;
+			if ((!ECN_ENABLED) || (n == INVALID_ADDR))
+				return;
+
+			it = routingTable.find(n);
+			if (it != routingTable.end()) {
+				it->second.congested = congested;
+				//echo("---------Setting neighbour %d congested = %d",n, congested);
+			}
+			if ((routeInfo.congested && !congested) || (routeInfo.parent == n && congested)) {
+				updateRouteTask();
+			}
+		}
+
+		// --------------------------------------------------------------------
+
 		void command_updateCongestedState(bool congested) {
 
 			congested_state = congested;
 
 			//This can speed up recovery from a congestion situation
-			//However, it is not encessarey most of the times
-			if (!ECNOff) {
+			//However, it is not necessary most of the times
+			if (ECN_ENABLED) {
 				resetInterval();
 			}
 
@@ -351,7 +371,9 @@ namespace wiselib {
 		// --------------------------------------------------------------------
 
 		enum TimerPeriods {
-			BEACON_INTERVAL = 8192
+			BEACON_INTERVAL = 8192,
+			MAX_INTERVAL	= 512000,
+			MIN_INTERVAL	= 128
 		};
 
 		// --------------------------------------------------------------------
@@ -373,7 +395,6 @@ namespace wiselib {
 
 		//Flag to enable/disable the alorithm's reaction to detecting a set Congestion flag in the message header
 		//TODO: Pass this as template parameter
-		bool ECNOff;
 		bool running;
 		bool justEvicted;
 
@@ -387,8 +408,6 @@ namespace wiselib {
 		bool routeTimerIsSet;
 		bool emergencyBeaconTimerIsSet;
 
-		uint32_t minInterval;
-		uint32_t maxInterval;
 		uint32_t currentInterval;
 		uint32_t t;
 		bool tHasPassed;
@@ -434,15 +453,10 @@ namespace wiselib {
 			routeTimerIsSet = false;
 			emergencyBeaconTimerIsSet = false;
 
-			//initialize RE parameters with default values
-			maxInterval = 512000;
-			minInterval = 128;
-
-			ECNOff = false;
 			running = false;
 			justEvicted = false;
 
-			currentInterval = minInterval;
+			currentInterval = MIN_INTERVAL;
 
 			state_is_root = false;
 
@@ -582,14 +596,14 @@ namespace wiselib {
 		}
 
 		void resetInterval() {
-			currentInterval = minInterval;
+			currentInterval = MIN_INTERVAL;
 			chooseAdvertiseTime(EMERGENCY_BEACON_TIMER);
 		}
 
 		void decayInterval() {
 			currentInterval *= 2;
-			if (currentInterval > maxInterval) {
-				currentInterval = maxInterval;
+			if (currentInterval > MAX_INTERVAL) {
+				currentInterval = MAX_INTERVAL;
 			}
 			chooseAdvertiseTime(BEACON_TIMER);
 		}
@@ -742,14 +756,13 @@ namespace wiselib {
 			*/
 
 
-
 			//If minEtx < MAX_METRIC, it means that we have found a better neighbour
 			if (minEtx < MAX_METRIC) {
-				echo("Better neighbour found = %d",best->first);
-				printRoutingTable();
+				//echo("Better neighbour found = %d",best->first);
+				//printRoutingTable();
 				if (routeInfo.congested) {
 
-					echo("Parent congested, trying to solve: best = %d, parent = %d, bestEtx = %d < %d  ******",best->first,best->second.parent,best->second.etx, routeInfo.etx);
+					//echo("Parent congested, trying to solve: best = %d, parent = %d, bestEtx = %d < %d  ******",best->first,best->second.parent,best->second.etx, routeInfo.etx);
 					//printRoutingTable();
 				}
 
@@ -774,7 +787,7 @@ namespace wiselib {
 						routeInfo.etx = best->second.etx;
 						routeInfo.congested = best->second.congested;
 
-						echo("Updated route: parent = %d, congested = %d, etx = %d",routeInfo.parent,routeInfo.congested, routeInfo.etx);
+						//echo("Updated route: parent = %d, congested = %d, etx = %d",routeInfo.parent,routeInfo.congested, routeInfo.etx);
 						//printRoutingTable();
 						
 				}
@@ -972,30 +985,12 @@ namespace wiselib {
 				// we do not return routing messages
 		}
 
-		// --------------------------------------------------------------------
-
-		void command_CtpInfo_setNeighborCongested(node_id_t n, bool congested) {
-			RoutingTableIterator it;
-			if ((ECNOff) || (n == INVALID_ADDR))
-				return;
-
-			it = routingTable.find(n);
-			if (it != routingTable.end()) {
-				it->second.congested = congested;
-				//echo("---------Setting neighbour %d congested = %d",n, congested);
-			}
-			if ((routeInfo.congested && !congested) || (routeInfo.parent == n && congested)) {
-				updateRouteTask();
-			}
-		}
-
-
 		// ----------------------------------------------------------------------------------
 
 		/* It is an event from the LE that signals that a neighbor is no longer reachable. 
 		* Need special care if that neighbor is our parent */
 		void event_LinkEstimator_evicted(node_id_t neighbor) {
-			echo("Neighbour evicted ********************************************");
+			//echo("Neighbour evicted ********************************************");
 			routingTableEvict(neighbor);
 			if (routeInfo.parent == neighbor) {
 				routeInfoInit(&routeInfo);

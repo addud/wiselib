@@ -484,13 +484,6 @@ namespace wiselib {
 
 		// --------------------------------------------------------------------
 
-		// Masks for the flag field in the link estimation header
-		enum {
-			// use last four bits to keep track of
-			// how many footer entries there are
-			NUM_ENTRIES_FLAG = 15
-		};
-
 		// Flags for the neighbor table entry
 		enum NeighbourTableEntryType {
 			VALID_ENTRY = 0x1,
@@ -542,7 +535,7 @@ namespace wiselib {
 		// if there is not enough room in the packet to put all the neighbour table
 		// entries, in order to do round robin we need to remember which entry
 		// we sent in the last beacon
-		uint8_t prevSentIdx;
+		uint8_t prev_sent_cnt;
 
 		bool running;
 
@@ -587,7 +580,7 @@ namespace wiselib {
 			running=false;
 
 			linkEstSeq = 0;
-			prevSentIdx = 0;
+			prev_sent_cnt = 0;
 		}
 
 		// ----------------------------------------------------------------------------------
@@ -798,8 +791,8 @@ namespace wiselib {
 		error_t addLinkEstHeaderAndFooter(LinkEstimatorMsg *msg, uint8_t len) {
 
 			NeighbourTableIterator it;
-			uint8_t j = 0, k;
-			uint8_t maxEntries, newPrevSentIdx = 0;
+			uint8_t j = 0;
+			uint8_t maxEntries, new_prev_sent_cnt = 0;
 
 			maxEntries = ((MAX_MESSAGE_LENGTH - LinkEstimatorMsg::HEADER_SIZE - len)
 				/ sizeof(neighbor_stat_entry_t));
@@ -808,22 +801,33 @@ namespace wiselib {
 
 			for (it = nt.begin(); it != nt.end() && j < maxEntries; it++) {
 				if (it->second.flags & (VALID_ENTRY | MATURE_ENTRY)) {
-					neighbor_stat_entry_t temp;
-					temp.ll_addr = it->first;
-					temp.inquality = it->second.inquality;
 
-					if (msg->add_neighbour_entry(j, (block_data_t*) &temp)
-						!= SUCCESS) {
-							echo("Could not add neighbour entry to LE message footer.");
-							return ERR_UNSPEC;
+					if (++new_prev_sent_cnt > prev_sent_cnt) {
+					
+						neighbor_stat_entry_t temp;
+						temp.ll_addr = it->first;
+						temp.inquality = it->second.inquality;
+
+						if (msg->add_neighbour_entry(j, (block_data_t*) &temp)
+							!= SUCCESS) {
+								echo("Could not add neighbour entry to LE message footer.");
+								return ERR_UNSPEC;
+						}
+
+						j++;
 					}
-					j++;
 				}
+			}
+
+			if (j==maxEntries) {
+				prev_sent_cnt += j;
+			} else {
+				prev_sent_cnt=0;
 			}
 
 			//for (int i = 0; i < NEIGHBOR_TABLE_SIZE && j < maxEntries; i++) {
 
-			//	k = (prevSentIdx + i + 1) % NEIGHBOR_TABLE_SIZE;
+			//	k = (prev_sent_cnt + i + 1) % NEIGHBOR_TABLE_SIZE;
 			//	if ((NeighborTable[k].flags & VALID_ENTRY)
 			//			&& (NeighborTable[k].flags & MATURE_ENTRY)) {
 
@@ -837,12 +841,12 @@ namespace wiselib {
 			//			return ERR_UNSPEC;
 			//		}
 
-			//		newPrevSentIdx = k;
+			//		new_prev_sent_cnt = k;
 
 			//		j++;
 			//	}
 			//}
-			//prevSentIdx = newPrevSentIdx;
+			//prev_sent_cnt = new_prev_sent_cnt;
 
 			msg->set_seqno(linkEstSeq++);
 			msg->set_ne(j);
