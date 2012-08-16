@@ -1,0 +1,32 @@
+
+===================================================================
+Wiselib CTP Algorithm Testing Guide
+===================================================================
+
+
+This document is intended to be a short guide for how to use the Wiselib CTP algorithm in an application and how to test some basic functionality.
+
+All the code related to the CTP implementation resides under /wiselib.stable/algorithms/routing/ctp. At the moment only two layers of the CTP protocol are implemented: the Routing Engine and the Link Estimator. The upper layer, ie. the Forwarding Engine, will be implemented after the midterm evaluation. Therefore, in order to fully test the current version, one would have to implement some of the FE's functions in the main application. However, since we are looking to test only basic functionality, we will try to keep the generic application to the minimum.
+
+
+------------ Employing CTP in an application --------------
+
+The file ctp_test.cpp found under /apps/generic_apps/ctp_test/ctp_test.cpp can serve as a model for employing the CTP algorithm and  stacking the its components. After initializing the components, we must set up the root node as root inside the Routing engine by calling the command_RootControl_setRoot() method. We must also somehow decide which nodes will send the data to the root. At the moment that is hardcoded in the application file.
+
+The main app must inteface directly only with the FE module. The FE module, besides the methods specific to the Routing protocol, exposes the is_congested() method, which return true if the current node is congested. Based on this, the app may take some decisions. Congestion detection and traffic balancing can be enabled/disabled through the ECN_ENABLED (Explicit Congestion Notification) template parameter in the RE.
+
+
+------------ Setting up the test scenario ------------------
+
+We are aiming to prove that given a network topology, the algorithm can find the best path to a root and that it can adapt to a change in the topology (e.g. failure of a node, change in link quality). Since we don't always have a static network topology to test on, I designed the testing setup so that we can define our own topology in code. At the moment, there already are setups for a Shawn simulation as well as for a simulation on the iSense nodes of the testbed at TUBS.
+
+Everything a user would want to change to configure for a test setup is in the ctp_debugging.h file. There we can define a network topology by first listing all nodes that it consists of (NODES). Since the node IDs can vary depending on the testbed, nodes in our topology are referred to with their index in the NODES array, so we only have to update this when we test on a different testbed.
+We can go on with designing the topology by defining the links between the nodes as undirected edges with costs, as 3-tuples of {node1,node2,link_quality} (CONNECTIONS). For this, of course, we must make sure that the two nodes are actually within each other's reach. We can force the LE module to report our predefined link qualities (ETX values) by uncommenting the DEBUG_ETX macro is defined.
+
+
+We also must specify at least one root node in the ROOT_NODES list that will act as a sink for messages.
+
+We can also define a list of nodes that we want to print debug messages on (DEBUG_NODES). Debug message are only printed if the CTP_DEBUGGING macro is defined. I suggest having this macro defined throughout the whole testing session.
+
+For some basic test cases covering the main features of the CTP protocol, see the document test_report.pdf
+
