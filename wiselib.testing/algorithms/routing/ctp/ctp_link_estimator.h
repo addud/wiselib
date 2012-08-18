@@ -129,7 +129,7 @@ namespace wiselib {
 		}
 
 		/*
-		* Radio concept methods 
+		* Radio concept methods
 		*/
 
 		// -----------------------------------------------------------------------
@@ -214,7 +214,7 @@ namespace wiselib {
 		}
 
 		/*
-		* Neighbourhood Concept methods 
+		* Neighbourhood Concept methods
 		*/
 
 		// ----------------------------------------------------------------------------------
@@ -233,7 +233,7 @@ namespace wiselib {
 
 		Neighbors &topology() {
 			return nt;
-		}		
+		}
 
 		// ----------------------------------------------------------------------------------
 
@@ -290,7 +290,7 @@ namespace wiselib {
 		}
 
 		/*
-		* CTP Specific methods 
+		* CTP Specific methods
 		*/
 
 		// ----------------------------------------------------------------------------------
@@ -298,13 +298,43 @@ namespace wiselib {
 		// return bi-directional link quality to the neighbour
 		ctp_etx_t command_LinkEstimator_getLinkQuality(node_id_t neighbour) {
 
-#if defined CTP_DEBUGGING && defined DEBUG_ETX
-			links_t* link = getLink(self, neighbour);
-			if (link != NULL) {
-				return link->etx;
+
+
+//			node_id_t n1=self;
+//			node_id_t n2 = neighbour;
+//
+//			for (int i = 0; i < LINKS_NR; i++) {
+//
+//				links_t link = CtpDebugging::links[i];
+//
+//				if ((link.n1 >= NODES_NR) || (link.n2 >= NODES_NR)) {
+//					echo("Invalid node index *********************");
+//					continue;
+//				}
+//
+//				if (((n1 == CtpDebugging::nodes[link.n1]) && (n2 == CtpDebugging::nodes[link.n2]))
+//						|| ((n1 == CtpDebugging::nodes[link.n2]) && (n2 == CtpDebugging::nodes[link.n1]))) {
+//
+//					return link.etx;
+//				}
+//			}
+
+
+#ifdef DEBUG_ETX
+
+//						echo("Requesting etx for %d and %d",self, neighbour);
+
+						ctp_etx_t link_etx = radio().getLink(self, neighbour);
+
+//						echo("Found link between %d and %d = %d",self, neighbour,link_etx);
+
+			if (link_etx != MAX_LINK_VALUE) {
+				return link_etx;
 			} else {
 				return VERY_LARGE_EETX_VALUE;
 			}
+
+
 #endif
 
 			NeighbourTableIterator it;
@@ -413,8 +443,8 @@ namespace wiselib {
 		// -----------------------------------------------------------------------
 
 
-		// called when an acknowledgement is received; 
-		// sign of a successful data transmission; 
+		// called when an acknowledgement is received;
+		// sign of a successful data transmission;
 		// to update forward link quality
 		error_t command_LinkEstimator_txAck(node_id_t neighbor) {
 			neighbor_table_entry_t *ne;
@@ -433,7 +463,7 @@ namespace wiselib {
 			return ERR_UNSPEC;
 		}
 
-		// called when an acknowledgement is not received; 
+		// called when an acknowledgement is not received;
 		// could be due to data pkt or acknowledgement loss
 		// to update forward link quality
 		error_t  command_LinkEstimator_txNoAck(node_id_t neighbor) {
@@ -448,7 +478,7 @@ namespace wiselib {
 					updateDEETX(ne);
 					//echo("Update DEETX for neighbor %d",neighbor);
 				}
-				
+
 				//print_neighbor_table();
 
 				return SUCCESS;
@@ -645,13 +675,9 @@ namespace wiselib {
 				return;
 			}
 
-#ifdef CTP_DEBUGGING
-			if (!areConnected(self, from)) {
-				return;
-			}
-#endif
-
 			LinkEstimatorMsg* msg = reinterpret_cast<LinkEstimatorMsg*>(data);
+
+//			echo("Received message with id = %d from %x",msg->msg_id(),from);
 
 			if (msg->msg_id() != CtpLinkEstimatorMsgId) {
 				return;
@@ -803,7 +829,7 @@ namespace wiselib {
 				if (it->second.flags & (VALID_ENTRY | MATURE_ENTRY)) {
 
 					if (++new_prev_sent_cnt > prev_sent_cnt) {
-					
+
 						neighbor_stat_entry_t temp;
 						temp.ll_addr = it->first;
 						temp.inquality = it->second.inquality;

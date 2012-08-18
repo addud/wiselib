@@ -80,7 +80,7 @@ namespace wiselib {
 
 		// --------------------------------------------------------------------
 
-		
+
 
 		enum Events {
 			RE_EVENT_ROUTE_NOT_FOUND = 0, RE_EVENT_ROUTE_FOUND = 1
@@ -101,7 +101,7 @@ namespace wiselib {
 		}
 
 		/*
-		* Neighbourhood Concept methods 
+		* Neighbourhood Concept methods
 		*/
 
 		// --------------------------------------------------------------------
@@ -138,8 +138,6 @@ namespace wiselib {
 
 			command_StdControl_start();
 
-			radio().enable_radio();
-
 		}
 
 		// --------------------------------------------------------------------
@@ -151,7 +149,6 @@ namespace wiselib {
 #endif
 
 			command_StdControl_stop();
-			radio().disable_radio();
 		}
 
 		// ----------------------------------------------------------------------------------
@@ -215,7 +212,7 @@ namespace wiselib {
 		}
 
 		/*
-		* CTP Specific methods 
+		* CTP Specific methods
 		*/
 
 		/* Simple implementation: return the current routeInfo */
@@ -362,7 +359,7 @@ namespace wiselib {
 		// --------------------------------------------------------------------
 
 		enum TreeRouting {
-			INVALID_ADDR = Radio::NULL_NODE_ID, 
+			INVALID_ADDR = Radio::NULL_NODE_ID,
 			ETX_THRESHOLD = 50, // link quality=20% -> ETX=5 -> Metric=50
 			PARENT_SWITCH_THRESHOLD = 15,
 			MAX_METRIC = RoutingTableValue::MAX_METRIC
@@ -527,9 +524,9 @@ namespace wiselib {
 				break;
 
 				/*
-				Since the wiselib doesn't allow us to change an already registered timeout callback, 
-				and as the number of timer callbacks we can set is limited, we use this separate 
-				type of timer to trigger an immmediate beacon send due to special cases, like sudden 
+				Since the wiselib doesn't allow us to change an already registered timeout callback,
+				and as the number of timer callbacks we can set is limited, we use this separate
+				type of timer to trigger an immmediate beacon send due to special cases, like sudden
 				changes in the network topology.
 				Basically it has the same functionality like the regular BEACON_TIMER,
 				just that it provides a fast-track for special events.
@@ -702,7 +699,7 @@ namespace wiselib {
 				}
 
 				/* Compute this neighbor's path metric */
-				linkEtx = 
+				linkEtx =
 					le_->command_LinkEstimator_getLinkQuality(it->first);
 
 #ifdef ROUTING_ENGINE_DEBUG
@@ -751,7 +748,7 @@ namespace wiselib {
 			3. or the current parent is not congested and the neighbor quality is better by
 			the PARENT_SWITCH_THRESHOLD.
 			Note: if our parent is congested, in order to avoid forming loops, we try to select
-			a node which is not a descendent of our parent. To ensure that, it needs to have 
+			a node which is not a descendent of our parent. To ensure that, it needs to have
 			an etx less than our parent's etx, that is routeInfo.ext.
 			*/
 
@@ -789,7 +786,7 @@ namespace wiselib {
 
 						//echo("Updated route: parent = %d, congested = %d, etx = %d",routeInfo.parent,routeInfo.congested, routeInfo.etx);
 						//printRoutingTable();
-						
+
 				}
 			}
 
@@ -821,12 +818,6 @@ namespace wiselib {
 			if (from == radio().id()) {
 				return;
 			}
-
-#ifdef CTP_DEBUGGING
-			if (!areConnected(self, from)) {
-				return;
-			}
-#endif
 
 			//Routing beacon => process inside the RE
 			RoutingMessage *msg = reinterpret_cast<RoutingMessage*>(data);
@@ -884,7 +875,7 @@ namespace wiselib {
 			} else {
 				beaconMsg.set_etx(
 					routeInfo.etx
-					+ 
+					+
 					le_->command_LinkEstimator_getLinkQuality(
 					routeInfo.parent));
 			}
@@ -987,7 +978,7 @@ namespace wiselib {
 
 		// ----------------------------------------------------------------------------------
 
-		/* It is an event from the LE that signals that a neighbor is no longer reachable. 
+		/* It is an event from the LE that signals that a neighbor is no longer reachable.
 		* Need special care if that neighbor is our parent */
 		void event_LinkEstimator_evicted(node_id_t neighbor) {
 			//echo("Neighbour evicted ********************************************");

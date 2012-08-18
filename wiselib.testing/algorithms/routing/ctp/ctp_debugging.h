@@ -27,11 +27,11 @@
 #include "util/serialization/simple_types.h"
 #include <limits.h>
 
-//uncomment for debugging mode
+//uncomment to enable hardcoded links between nodes
 #define CTP_DEBUGGING
 
 //uncomment to enable hardcoded link quality gradients
-//#define DEBUG_ETX
+#define DEBUG_ETX
 
 //Uncomment to enable general RE debug messages
 //#define FORWARDING_ENGINE_DEBUG
@@ -45,16 +45,17 @@
 #define NODES_NR			4
 //#define NODES				{410,411,412,413,414,415,416,417} //tubs isense ids
 //#define NODES				{418,419,420,421,422,424,426,427} // alternate tubs isense ids
-#define NODES				{0,1,2,3} //Shawn ids
-
+//#define NODES				{0,1,2,3} //Shawn ids
+#define NODES				{0x2000,0x2001,0x2008,0x2009} // alternate lubeck isense ids
 
 /* All these numbers represent indexes of the node IDs in the NODES list. */
 
 //#define LINKS_NR			8
 //#define LINKS 			{{0,1,1},{1,2,1},{2,3,1},{3,4,1},{4,5,1},{5,6,1},{6,7,1},{7,0,1}}
+#define MAX_LINK_VALUE 		USHRT_MAX
 
 #define LINKS_NR			4
-#define LINKS 				{{0,1,1},{1,3,50},{2,3,20},{100,100,USHRT_MAX}}
+#define LINKS 				{{0,1,1},{1,3,50},{2,3,20},{1,1,MAX_LINK_VALUE}}
 
 #define SENDER_NODES_NR		1
 #define SENDER_NODES		{3}
@@ -66,9 +67,8 @@
 //Node indexes we want to print debug messages on
 //#define DEBUG_NODES			{0,1,2,3,4,5,6,7}
 //#define DEBUG_NODES_NR 		8
-#define DEBUG_NODES_NR 	4
 #define DEBUG_NODES		{0,1,2,3}
-
+#define DEBUG_NODES_NR 4
 
 namespace wiselib {
 
@@ -78,40 +78,12 @@ typedef struct {
 	ctp_etx_t etx;
 } links_t;
 
-const uint16_t nodes[NODES_NR] = NODES;
-const uint16_t sender_nodes[SENDER_NODES_NR] = SENDER_NODES;
-const uint16_t root_nodes[ROOT_NODES_NR] = ROOT_NODES;
-const uint16_t debug_nodes[DEBUG_NODES_NR] = DEBUG_NODES;
 
-links_t links[LINKS_NR] = LINKS;
+	static const uint16_t nodes[NODES_NR]=NODES;
+	static const uint16_t sender_nodes[SENDER_NODES_NR]=SENDER_NODES;
+	static const uint16_t root_nodes[ROOT_NODES_NR]=ROOT_NODES;
+	static const uint16_t debug_nodes[DEBUG_NODES_NR]=DEBUG_NODES;
 
-links_t* getLink(uint16_t n1, uint16_t n2) {
-
-	int i;
-
-	for (i = 0; i < LINKS_NR; i++) {
-		if (((n1 == nodes[links[i].n1])
-				&& (n2 == nodes[links[i].n2]))
-				|| ((n1 == nodes[links[i].n2])
-						&& (n2 == nodes[links[i].n1]))) {
-			return &(links[i]);
-		}
-	}
-
-	return NULL;
-}
-
-bool areConnected(uint16_t n1, uint16_t n2) {
-	links_t *link = getLink(n1,n2);
-
-	if (link!=NULL) {
-		if (link->etx < USHRT_MAX) {
-			return true;
-		}
-	}
-
-	return false;
-}
 
 }
 

@@ -13,15 +13,18 @@
 #include "algorithms/routing/ctp/ctp_send_queue_value.h"
 #include "internal_interface/routing_table/routing_table_static_array.h"
 #include "util/base_classes/routing_base.h"
-#include "util/base_classes/uart_base.h"
 #include "util/pstl/queue_static.h"
+#include "debug_radio.h"
 
 typedef wiselib::OSMODEL Os;
-typedef Os::TxRadio Radio;
+typedef Os::TxRadio TxRadio;
+typedef wiselib::DebugRadio<Os,TxRadio> Radio;
+
+//typedef TxRadio Radio;
+
 typedef Os::Debug Debug;
 typedef Os::Clock Clock;
 typedef Os::Timer Timer;
-typedef Os::Uart Uart;
 typedef Radio::node_id_t node_id_t;
 typedef Radio::block_data_t block_data_t;
 
@@ -60,18 +63,22 @@ public:
 	char c;
 
 	void init(Os::AppMainParameter& value) {
-		radio_ = &wiselib::FacetProvider<Os, Radio>::get_facet(value);
+		txradio_ = &wiselib::FacetProvider<Os, TxRadio>::get_facet(value);
 		timer_ = &wiselib::FacetProvider<Os, Timer>::get_facet(value);
 		debug_ = &wiselib::FacetProvider<Os, Debug>::get_facet(value);
 		clock_ = &wiselib::FacetProvider<Os, Clock>::get_facet(value);
-		uart_ = &wiselib::FacetProvider<Os, Uart>::get_facet( value );
 
-		radio_->set_power(Radio::TxPower::MAX);
-		random_number_.init(*radio_, *debug_, *clock_);
+		txradio_->set_power(TxRadio::TxPower::MAX);
 
-		uart_->enable_serial_comm();
+		//		radio_ = txradio_;
 
-		uart_->reg_read_callback<CtpTest, &CtpTest::receive_serial>( this );
+		radio_ = &debug_radio_;
+		radio_->init(*txradio_);
+
+
+
+
+		random_number_.init(*txradio_, *debug_, *clock_);
 
 		le_.init(*radio_, *timer_, *debug_, *clock_, random_number_);
 		le_.enable_radio();
@@ -89,7 +96,7 @@ public:
 			}
 		}
 
-		debug_->debug("Node %d started\n", radio_->id());
+		debug_->debug("Node %x started\n", radio_->id());
 
 		fe_.reg_recv_callback<CtpTest, &CtpTest::receive_radio_message>(this);
 
@@ -100,7 +107,7 @@ public:
 			}
 		}
 
-		//timer_->set_timer<CtpTest, &CtpTest::first_change>(20000, this, 0);
+		timer_->set_timer<CtpTest, &CtpTest::first_change>(20000, this, 0);
 
 		c='0';
 	}
@@ -112,7 +119,7 @@ public:
 
 		message[0] = c++;
 
-		debug_->debug("%d: APP sends message %s\n", radio_->id(), message);
+		debug_->debug("%x: APP sends message %s\n", radio_->id(), message);
 
 		fe_.send(Radio::BROADCAST_ADDRESS, sizeof(message), message);
 
@@ -120,63 +127,43 @@ public:
 		timer_->set_timer < CtpTest, &CtpTest::start > (5000, this, 0);
 	}
 
-	//Cheanges the quelity of one pre-defined link
-	void change_link(node_id_t n1, node_id_t n2, uint16_t etx) {
-		wiselib::links_t* link = wiselib::getLink(n1, n2);
-		if (link != NULL) {
-			debug_->debug("%d: APP: Link %d - %d changed from %d to %d\n",radio_->id(),n1,n2,link->etx, etx);
-			link->etx = etx;
-		}
-	}
-
 	// --------------------------------------------------------------------
 	void receive_radio_message(node_id_t from, Radio::size_t len,
 		block_data_t *buf) {
-			debug_->debug("%d: APP: Message %s reached the root from %d\n",
+			debug_->debug("%x: APP: Message %s reached the root from %x\n",
 				radio_->id(), buf, from);
-	}
-
-	void receive_serial( Uart::size_t len, Uart::block_data_t *buf )
-	{
-
-		debug_->debug("APP received serial message");
-		if (len<4) {
-			debug_->debug("APP: Unexpected serial message");
-			return;
-		}
-		debug_->debug( "APP: UART: received new ETX: n1 = 5d, n2 = %d, etx = 5d",buf[0],buf[1],(buf[2]<<8)|buf[3] );
-
-		change_link(buf[0],buf[1],(buf[2]<<8)|buf[3]);
-
-		//uart_->write( len, (Uart::block_data_t*)buf );
 	}
 
 	//Changes in network topology used during tests
 	void first_change(void*) {
-		debug_->debug("%d: APP First Change\n",radio_->id());
-		wiselib::links_t* link = &wiselib::links[1];
-		link->n1=100;
-		link->n2=100;
-		link->etx=USHRT_MAX;
 
-		timer_->set_timer < CtpTest, &CtpTest::second_change > (40000, this, 0);
+		debug_->debug("APP: First change occured *****************");
+
+		radio_->changeLink(0,1,2,2,MAX_LINK_VALUE);
+
+
+		timer_->set_timer < CtpTest, &CtpTest::second_change > (30000, this, 0);
 	}
 
 	void second_change(void*) {
-		debug_->debug("%d: APP: Second Change\n",radio_->id());
-		wiselib::links_t* link = &wiselib::links[3];
-		link->n1=2;
-		link->n2=0;
-		link->etx=60;
+		debug_->debug("APP: Second change occured *****************");
+
+		radio_->changeLink(1,1,0,2,100);
+
+		for (int i=0;i<LINKS_NR;i++) {
+			debug_->debug("Link[%d]: %d - %d = %d",i, radio_->links[i][0], radio_->links[i][1], radio_->links[i][2]);
+		}
+
 		//timer_->set_timer < CtpTest, &CtpTest::second_change > (20000, this, 0);
 	}
 
 private:
+	Radio debug_radio_;
+	TxRadio::self_pointer_t txradio_;
 	Radio::self_pointer_t radio_;
 	Timer::self_pointer_t timer_;
 	Debug::self_pointer_t debug_;
 	Clock::self_pointer_t clock_;
-	Uart::self_pointer_t uart_;
 	RandomNumber random_number_;
 	LinkEstimator le_;
 	RoutingEngine re_;
