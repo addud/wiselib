@@ -235,6 +235,7 @@ public:
 	 */
 
 	// ----------------------------------------------------------------------------------
+
 	void enable() {
 		enable_radio();
 	}
@@ -443,6 +444,8 @@ public:
 		return ERR_UNSPEC;
 	}
 
+	// -----------------------------------------------------------------------
+
 	// called when an acknowledgement is not received;
 	// could be due to data pkt or acknowledgement loss
 	// to update forward link quality
@@ -465,6 +468,8 @@ public:
 		}
 		return ERR_UNSPEC;
 	}
+
+	// -----------------------------------------------------------------------
 
 	// called when the parent changes
 	// clear state about data-driven link quality
@@ -508,6 +513,8 @@ private:
 		PINNED_ENTRY = 0x8
 	};
 
+	// -----------------------------------------------------------------------
+
 	// configure the link estimator and some constants
 	enum LinkEstimatorConstants {
 		// If the eetx estimate is below this threshold
@@ -538,10 +545,10 @@ private:
 	};
 
 	// -----------------------------------------------------------------------
-	// keep information about links from the neighbors
 
 	// link estimation sequence, increment every time a beacon is sent
 	uint8_t link_est_seq_;
+
 	// if there is not enough room in the packet to put all the neighbour table
 	// entries, in order to do round robin we need to remember which entry
 	// we sent in the last beacon
@@ -552,7 +559,7 @@ private:
 	// Node id
 	node_id_t self_;
 
-	/* Neighbour table -- info about link to the neighbours */
+	/* Neighbour table -- info about links to the neighbours */
 	Neighbors neighbors_;
 
 	RecvCallbackVector recv_callbacks_;
@@ -705,7 +712,7 @@ private:
 #ifdef LINK_ESTIMATOR_DEBUG
 			echo("Found the entry so updating");
 #endif
-			updateNeighbourEntry(it, msg->seqno());
+			update_neighbor_entry(it, msg->seqno());
 
 		} else {
 
@@ -716,7 +723,7 @@ private:
 #endif
 
 				init_neighbour_value(&neighbors_[from]);
-				updateNeighbourEntry(it, msg->seqno());
+				update_neighbor_entry(it, msg->seqno());
 
 			} else {
 
@@ -748,6 +755,8 @@ private:
 	void signal_evicted(node_id_t n) {
 		notify_listeners(LE_EVENT_NEIGHBOUR_EVICTED, n, NULL);
 	}
+
+	// -----------------------------------------------------------------------
 
 	void signal_should_insert(node_id_t node, block_data_t* msg) {
 		notify_listeners(LE_EVENT_SHOULD_INSERT, node, msg);
@@ -802,7 +811,9 @@ private:
 		return SUCCESS;
 	}
 
-	// initialize the given entry in the table for neighbor ll_addr
+	// -----------------------------------------------------------------------
+
+	// initialize the given entry in the table
 	void init_neighbour_value(NeighborsValue *ne) {
 		ne->lastseq = 0;
 		ne->rcvcnt = 0;
@@ -815,8 +826,7 @@ private:
 
 	// ----------------------------------------------------------------------------------
 
-	// find the worst neighbor if the eetx
-	// estimate is greater than the given threshold
+	// find the worst neighbor if the eetx estimate is greater than the given threshold
 	NeighborsIterator find_worst_neighbour(uint8_t thresholdEETX) {
 
 		NeighborsIterator it, worstNeighbour;
@@ -854,8 +864,7 @@ private:
 
 	// ----------------------------------------------------------------------------------
 
-	// find a neighbour entry that is
-	// valid but not pinned
+	// find a neighbour entry that is valid but not pinned
 	bool eligible_for_removal(NeighborsIterator it) {
 		if (it->second.flags & VALID_ENTRY
 				&& !(it->second.flags & (PINNED_ENTRY | MATURE_ENTRY))) {
@@ -863,6 +872,8 @@ private:
 		}
 		return false;
 	}
+
+	// -----------------------------------------------------------------------
 
 	NeighborsIterator find_random_neighbour() {
 		NeighborsIterator it;
@@ -994,7 +1005,7 @@ private:
 	// we received seq from the neighbor pointed by it
 	// update the last seen seq, receive and fail count
 	// refresh the age
-	void updateNeighbourEntry(NeighborsIterator it, uint8_t seq) {
+	void update_neighbor_entry(NeighborsIterator it, uint8_t seq) {
 		NeighborsValue *ne;
 		uint8_t packetGap;
 

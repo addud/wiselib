@@ -243,7 +243,7 @@ namespace wiselib {
 
 		// --------------------------------------------------------------------
 
-		// A simple predicate for now to determine congestion state of this node.
+		// A simple predicate to determine congestion state of this node.
 		bool command_CtpCongestion_isCongested() {
 			return command_SendQueue_size() > congestionThreshold;
 		}
@@ -585,7 +585,7 @@ namespace wiselib {
 					//The message has passed through the node before
 					//It is floating around waiting for a route to be found
 					//Speed up the process by forcing the RE to recompute routes
-					cre->command_CtpInfo_recomputeRoutes();
+					cre->trigger_route_update();
 				}
 
 				//... and in the queue for duplicates
@@ -602,10 +602,10 @@ namespace wiselib {
 				}
 
 				if (msg->pull()) {
-					cre->command_CtpInfo_triggerRouteUpdate();
+					cre->program_route_update();
 				}
 
-				cre->command_CtpInfo_setNeighborCongested(from,msg->congestion());
+				cre->set_neighbor_congested(from,msg->congestion());
 
 				//Send back ack msg
 				AckMsg ack_msg(CtpAckMsgId);
@@ -614,7 +614,7 @@ namespace wiselib {
 
 				radio().send(from,AckMsg::HEADER_SIZE,reinterpret_cast<block_data_t*>(&ack_msg));
 
-				if (cre->command_RootControl_isRoot()) {
+				if (cre->is_root()) {
 
 					// If I'm the root, signal receive.
 					notify_receivers(from, len - DataMessage::HEADER_SIZE,
@@ -622,7 +622,7 @@ namespace wiselib {
 					return;
 
 				} else {
-					echo("message %s from %x to %x",msg->payload(),self,cre->command_Routing_nextHop());
+					echo("message %s from %x to %x",msg->payload(),self,cre->get_next_hop());
 					forward(len, msg);
 				}
 			}
@@ -658,7 +658,7 @@ namespace wiselib {
 			if (command_SendQueue_enqueue(qe) == SUCCESS) {
 
 				// Loop-detection code:
-				if (cre->command_CtpInfo_getEtx(&gradient) == SUCCESS) {
+				if (cre->get_etx(&gradient) == SUCCESS) {
 					// We only check for loops if we know our own metric
 					if (msg->etx() <= gradient) {
 						// If our etx metric is less than or equal to the etx value
@@ -666,7 +666,7 @@ namespace wiselib {
 						// we are in a loop.
 						// Trigger a route update and backoff.
 						echo("Possible Loop Detection...");
-						cre->command_CtpInfo_triggerRouteUpdate();
+						cre->program_route_update();
 						startRetxmitTimer(LOOPY_WINDOW, LOOPY_OFFSET);
 					}
 				}
@@ -704,7 +704,7 @@ namespace wiselib {
 
 					// Packet successfully txmitted
 					//echo("Message %s was acked by %d",qe->msg->payload(),from);
-					le_->ack_received(cre->command_Routing_nextHop());
+					le_->ack_received(cre->get_next_hop());
 					command_SentCache_insert(qe->msg);
 					command_SendQueue_dequeue();
 				}
@@ -795,7 +795,7 @@ namespace wiselib {
 			qe->len = len + DataMessage::HEADER_SIZE;
 			qe->retries = MAX_RETRIES;
 
-			echo("message %s from %x to %x",pkt,self,cre->command_Routing_nextHop());
+			echo("message %s from %x to %x",pkt,self,cre->get_next_hop());
 
 			if (command_SendQueue_enqueue(qe) == SUCCESS) {
 				if (!reTxTimerIsRunning) {
@@ -817,7 +817,7 @@ namespace wiselib {
 				return;
 			}
 
-			if (!cre->command_RootControl_isRoot() && !cre->command_Routing_hasRoute()) {
+			if (!cre->is_root() && !cre->has_route()) {
 
 				// retx called
 
@@ -832,10 +832,10 @@ namespace wiselib {
 
 				error_t subsendResult;
 				fe_queue_entry_t* qe = command_SendQueue_head();
-				node_id_t dest = cre->command_Routing_nextHop();
+				node_id_t dest = cre->get_next_hop();
 				ctp_etx_t gradient;
 
-				if (cre->command_CtpInfo_isNeighborCongested(dest)) { // NOT CHECKED
+				if (cre->is_neighbor_congested(dest)) { // NOT CHECKED
 					// Our parent is congested. We should wait.
 					// Don't repost the task, CongestionTimer will do the job
 					echo("Parent %x congested. Wait....",dest);
@@ -863,7 +863,7 @@ namespace wiselib {
 					lastParent = dest;
 				}
 
-				if (cre->command_RootControl_isRoot()) { // CHECK -> OK: loppbacked message to app layer.
+				if (cre->is_root()) { // CHECK -> OK: loppbacked message to app layer.
 
 					fe_queue_entry_t* entry = command_SendQueue_head();
 
@@ -877,7 +877,7 @@ namespace wiselib {
 				}
 
 				// Loop-detection functionality:
-				if (cre->command_CtpInfo_getEtx(&gradient) != SUCCESS) { // NOT CHECKED
+				if (cre->get_etx(&gradient) != SUCCESS) { // NOT CHECKED
 					// If we have no metric, set our gradient conservatively so
 					// that other nodes don't automatically drop our packets.
 					gradient = 0;
@@ -933,7 +933,7 @@ namespace wiselib {
 						//Have tried to send this message before but didn't receive any ack
 
 						le_->ack_not_received(dest);
-						cre->command_CtpInfo_recomputeRoutes();
+						cre->trigger_route_update();
 
 						//echo("Message %s not acked.",qe->msg->payload());
 
@@ -953,7 +953,7 @@ namespace wiselib {
 						command_SendQueue_dequeue();
 						command_SentCache_insert(qe->msg);
 
-						cre->command_CtpInfo_triggerRouteUpdate();
+						cre->program_route_update();
 
 						startRetxmitTimer(SENDDONE_OK_WINDOW, SENDDONE_OK_OFFSET);
 
@@ -983,7 +983,7 @@ namespace wiselib {
 				sendqueue.push(qe);
 				entrypool_.pop();
 				msgpool_.pop();
-				cre->command_updateCongestedState(
+				cre->update_congested_state(
 					command_CtpCongestion_isCongested());
 				return SUCCESS;
 			} else
@@ -999,7 +999,7 @@ namespace wiselib {
 			sendqueue.pop();
 			entrypool_.push(*ptr);
 			msgpool_.push(*(ptr->msg));
-			cre->command_updateCongestedState(command_CtpCongestion_isCongested());
+			cre->update_congested_state(command_CtpCongestion_isCongested());
 			return ptr;
 		}
 

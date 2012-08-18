@@ -91,7 +91,7 @@ public:
 
 		for (int i = 0; i < ROOT_NODES_NR; i++) {
 			if (radio_->id() == wiselib::nodes[wiselib::root_nodes[i]]) {
-				re_.command_RootControl_setRoot();
+				re_.set_root();
 				break;
 			}
 		}
