@@ -239,7 +239,7 @@ namespace wiselib {
 				// path etx = etx(parent) + etx(link to the parent)
 				*etx = routeInfo.etx
 					+
-					le_->command_LinkEstimator_getLinkQuality(
+					le_->get_link_quality(
 					routeInfo.parent);
 			}
 			return SUCCESS;
@@ -700,7 +700,7 @@ namespace wiselib {
 
 				/* Compute this neighbor's path metric */
 				linkEtx =
-					le_->command_LinkEstimator_getLinkQuality(it->first);
+					le_->get_link_quality(it->first);
 
 #ifdef ROUTING_ENGINE_DEBUG
 				echo("%d: ", self);
@@ -776,9 +776,9 @@ namespace wiselib {
 						echo("Changed parent from %d to %d",
 							(int) routeInfo.parent, (int) best->first);
 #endif
-						le_->command_LinkEstimator_unpinNeighbor(routeInfo.parent);
-						le_->command_LinkEstimator_pinNeighbor(best->first);
-						le_->command_LinkEstimator_clearDLQ(best->first);
+						le_->unpin_neighbor(routeInfo.parent);
+						le_->pin_neighbor(best->first);
+						le_->clear_DLQ(best->first);
 
 						routeInfo.parent = best->first;
 						routeInfo.etx = best->second.etx;
@@ -836,7 +836,7 @@ namespace wiselib {
 				break;
 			case (LinkEstimator::LE_EVENT_SHOULD_INSERT):
 				if (event_CompareBit_shouldInsert(msg)) {
-					le_->command_LinkEstimator_forceInsertNeighbor(neighbor);
+					le_->force_insert_neighbor(neighbor);
 				}
 				break;
 			default:
@@ -876,7 +876,7 @@ namespace wiselib {
 				beaconMsg.set_etx(
 					routeInfo.etx
 					+
-					le_->command_LinkEstimator_getLinkQuality(
+					le_->get_link_quality(
 					routeInfo.parent));
 			}
 
@@ -958,9 +958,9 @@ namespace wiselib {
 						echo("%d: ", self);
 						echo("from a root, inserting if not in table");
 #endif
-						le_->command_LinkEstimator_insertNeighbor(from);
+						le_->insert_neighbor(from);
 						//				echo("Pinned %d", from);
-						le_->command_LinkEstimator_pinNeighbor(from);
+						le_->pin_neighbor(from);
 
 					}
 					routingTableUpdateEntry(from, rcvBeacon->parent(),
@@ -1041,7 +1041,7 @@ namespace wiselib {
 					if (it->first == routeInfo.parent)
 						continue;
 					neighEtx = entry.etx;
-					//neighEtx = evaluateEtx(le->LinkEstimator.getLinkQuality(entry->neighbor));
+					//neighEtx = evaluateEtx(le->LinkEstimator.get_linkQuality(entry->neighbor));
 					found |= (pathEtx < neighEtx);
 			}
 			return found;
@@ -1062,7 +1062,7 @@ namespace wiselib {
 			ctp_etx_t etx) {
 				RoutingTableIterator it;
 				ctp_etx_t linkEtx;
-				linkEtx = le_->command_LinkEstimator_getLinkQuality(from);
+				linkEtx = le_->get_link_quality(from);
 
 				it = routingTable.find(from);
 				if ((it == routingTable.end())

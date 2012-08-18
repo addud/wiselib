@@ -139,7 +139,7 @@ public:
 
 		debug_->debug("APP: First change occured *****************");
 
-		radio_->changeLink(0,1,2,2,MAX_LINK_VALUE);
+		radio_->change_link(0,1,2,2,MAX_LINK_VALUE);
 
 
 		timer_->set_timer < CtpTest, &CtpTest::second_change > (30000, this, 0);
@@ -148,11 +148,11 @@ public:
 	void second_change(void*) {
 		debug_->debug("APP: Second change occured *****************");
 
-		radio_->changeLink(1,1,0,2,100);
+		radio_->change_link(1,1,0,2,100);
 
-		for (int i=0;i<LINKS_NR;i++) {
-			debug_->debug("Link[%d]: %d - %d = %d",i, radio_->links[i][0], radio_->links[i][1], radio_->links[i][2]);
-		}
+//		for (int i=0;i<LINKS_NR;i++) {
+//			debug_->debug("Link[%d]: %d - %d = %d",i, radio_->links[i][0], radio_->links[i][1], radio_->links[i][2]);
+//		}
 
 		//timer_->set_timer < CtpTest, &CtpTest::second_change > (20000, this, 0);
 	}

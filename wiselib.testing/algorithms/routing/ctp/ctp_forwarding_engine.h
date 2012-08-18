@@ -704,7 +704,7 @@ namespace wiselib {
 
 					// Packet successfully txmitted
 					//echo("Message %s was acked by %d",qe->msg->payload(),from);
-					le_->command_LinkEstimator_txAck(cre->command_Routing_nextHop());
+					le_->ack_received(cre->command_Routing_nextHop());
 					command_SentCache_insert(qe->msg);
 					command_SendQueue_dequeue();
 				}
@@ -932,7 +932,7 @@ namespace wiselib {
 
 						//Have tried to send this message before but didn't receive any ack
 
-						le_->command_LinkEstimator_txNoAck(dest);
+						le_->ack_not_received(dest);
 						cre->command_CtpInfo_recomputeRoutes();
 
 						//echo("Message %s not acked.",qe->msg->payload());
