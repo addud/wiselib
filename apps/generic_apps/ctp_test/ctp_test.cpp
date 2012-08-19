@@ -104,7 +104,7 @@ public:
 			}
 		}
 
-		timer_->set_timer<CtpTest, &CtpTest::first_change>(20000, this, 0);
+		timer_->set_timer<CtpTest, &CtpTest::first_change>(30000, this, 0);
 
 		c='0';
 	}

@@ -517,8 +517,7 @@ private:
 			//... and in the queue for duplicates
 
 			if (send_queue_contains(msg)) {
-				echo("Discarding duplicate sendQueue msg = %s, seqno = %d, thl = %d from %x",
-						msg->payload(), msg->seqno(), msg->thl(), from);
+//				echo("Discarding duplicate sendQueue msg = %s, seqno = %d, thl = %d from %x",msg->payload(), msg->seqno(), msg->thl(), from);
 				return;
 			}
 
