@@ -28,10 +28,10 @@
 #include <limits.h>
 
 //uncomment to enable hardcoded links between nodes
-#define CTP_DEBUGGING
+//#define CTP_DEBUGGING
 
 //uncomment to enable hardcoded link quality gradients
-#define DEBUG_ETX
+//#define DEBUG_ETX
 
 //Uncomment to enable general RE debug messages
 //#define FORWARDING_ENGINE_DEBUG
