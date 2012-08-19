@@ -893,7 +893,7 @@ private:
 			return neighbors_.end();
 		}
 
-		cnt = random_number().randChar(num_eligible_eviction);
+		cnt = random_number().char_rand(num_eligible_eviction);
 
 		//parse the table to find the generated random neighbour
 		for (it = neighbors_.begin(); it != neighbors_.end(); it++) {

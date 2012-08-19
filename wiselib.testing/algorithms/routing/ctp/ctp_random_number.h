@@ -112,7 +112,7 @@ there is no need for the MOD operator.
 		// -----------------------------------------------------------------------
 
 		unsigned long rand(unsigned long max_value) {
-			return randLong(max_value);
+			return long_rand(max_value);
 		}
 
 		// -----------------------------------------------------------------------
@@ -122,7 +122,7 @@ there is no need for the MOD operator.
 
 	      ///@name Other Data Types
       ///@{
-		unsigned long randLong(unsigned long limit = ULONG_MAX)
+		unsigned long long_rand(unsigned long limit = ULONG_MAX)
 		{
 			unsigned long iOutput=0;
 			unsigned long iTemp;
@@ -143,7 +143,7 @@ there is no need for the MOD operator.
 
 		// -----------------------------------------------------------------------
 
-		unsigned short int randShort(unsigned short limit = USHRT_MAX)
+		unsigned short int short_rand(unsigned short limit = USHRT_MAX)
 		{
 			unsigned short int iOutput=0;
 			unsigned long iTemp;
@@ -161,7 +161,7 @@ there is no need for the MOD operator.
 
 		// -----------------------------------------------------------------------
 
-		unsigned char randChar(unsigned char limit = CHAR_MAX)
+		unsigned char char_rand(unsigned char limit = CHAR_MAX)
 		{
 			unsigned char cOutput=0;
 			unsigned long iTemp;
@@ -178,7 +178,7 @@ there is no need for the MOD operator.
 
 		// -----------------------------------------------------------------------
 
-		bool randBit()
+		bool bit_rand()
 		{
 			iCurrent_ = (MACRO_A * iCurrent_ + 1);
 			return (iCurrent_ >> 31) == 0;

@@ -75,9 +75,6 @@ public:
 		radio_ = &debug_radio_;
 		radio_->init(*txradio_);
 
-
-
-
 		random_number_.init(*txradio_, *debug_, *clock_);
 
 		le_.init(*radio_, *timer_, *debug_, *clock_, random_number_);

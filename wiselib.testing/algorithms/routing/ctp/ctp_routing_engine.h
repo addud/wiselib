@@ -713,7 +713,7 @@ private:
 			uint16_t nextInt;
 
 			//set new random routing beacon interval
-			nextInt = random_number().randShort(BEACON_INTERVAL);
+			nextInt = random_number().short_rand(BEACON_INTERVAL);
 
 			nextInt += BEACON_INTERVAL >> 1;
 			set_timer((void*) BEACON_TIMER, nextInt);
