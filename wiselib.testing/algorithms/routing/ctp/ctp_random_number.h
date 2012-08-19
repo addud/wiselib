@@ -31,23 +31,16 @@ namespace wiselib {
    /**
     * \brief An implementation of the  \ref random_number_concept "Random Number Concept" based on the Basic Linear Congruential Generator algorithm
     *
-    *  \ingroup random_number_concept
+    *  @ingroup random_number_concept
     *
     * An implementation of the  \ref random_number_concept "Random Number Concept" based on the Basic Linear Congruential Generator algorithm
-
-
-	The heart of LCG is the following formula
-
-X(i+1) = (a * X(i) + c) mod M
-
-
-NOTE: a and c are selected for no particular properties
-and I have not run statistical tests on this number gernerator
-it is was written for demonstration purposes only.
-
-Since this is mod 2^32 and our data type is 32 bits long
-there is no need for the MOD operator.
-
+    *
+    *
+    * 	The heart of LCG is the following formula
+    * 	X(i+1) = (a * X(i) + c) mod M
+    * 	NOTE: a and c are selected for no particular properties and I have not run statistical tests on this number gernerator it is was written for demonstration purposes only.
+    *
+    * 	Since this is mod 2^32 and our data type is 32 bits long there is no need for the MOD operator.
     */
 
 	template<typename OsModel_P, typename Radio_P = typename OsModel_P::Radio, typename Clock_P = typename OsModel_P::Clock,

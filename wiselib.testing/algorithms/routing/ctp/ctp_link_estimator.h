@@ -32,13 +32,24 @@
 
 namespace wiselib {
 
+/**
+ * \brief Link Estimator Module
+ *
+ * The Link Estimator takes care of determining the inbound and outbound quality of 1-hop communication links.
+ * The idea for this estimation is to employ the  ETX algorithm. The LE computes the 1-hop ETX by collecting statistics over the number of beacons received and the number of successfully transmitted data packets.
+ *
+ * @ingroup radio_concept
+ * @ingroup topology_concept
+ */
+
 template<typename OsModel_P, typename Neigh_P, typename RandomNumber_P,
 		typename Radio_P = typename OsModel_P::Radio,
 		typename Timer_P = typename OsModel_P::Timer,
 		typename Debug_P = typename OsModel_P::Debug,
 		typename Clock_P = typename OsModel_P::Clock>
 class CtpLinkEstimator: public RadioBase<OsModel_P, typename Radio_P::node_id_t,
-		typename Radio_P::size_t, typename Radio_P::block_data_t> {
+		typename Radio_P::size_t, typename Radio_P::block_data_t>,
+		public BasicTopology<OsModel_P, Neigh_P, Radio_P, Timer_P> {
 public:
 
 	static const char LE_MAX_EVENT_RECEIVERS = 2;
@@ -128,11 +139,11 @@ public:
 #endif
 	}
 
-	/*
-	 * Radio concept methods
-	 */
-
 	// -----------------------------------------------------------------------
+
+	///@name Radio Concept methods
+	///@{
+
 	int init(Radio& radio, Timer& timer, Debug& debug, Clock& clock,
 			RandomNumber& random_number) {
 		radio_ = &radio;
@@ -182,7 +193,7 @@ public:
 			return ERR_BUSY;
 		}
 
-		 // initialize the LinkEstimator packet
+		// initialize the LinkEstimator packet
 		LinkEstimatorMsg le_msg(CtpLinkEstimatorMsgId);
 
 		// adds the header and dynamically adds the size of the footer.
@@ -230,11 +241,12 @@ public:
 		return SUCCESS;
 	}
 
-	/*
-	 * Neighbourhood Concept methods
-	 */
+	///@}
 
 	// ----------------------------------------------------------------------------------
+
+	///@name Topology Concept methods
+	///@{
 
 	void enable() {
 		enable_radio();
@@ -299,12 +311,19 @@ public:
 		return idx;
 	}
 
-	/*
-	 * CTP Specific methods
-	 */
+	///@}
 
 	// ----------------------------------------------------------------------------------
-	// return bi-directional link quality to the neighbour
+
+	///@name CTP Specific methods
+	///@{
+
+	// ----------------------------------------------------------------------------------
+
+	/**
+	 * Return bi-directional link quality to the neighbour
+	 */
+
 	ctp_etx_t get_link_quality(node_id_t neighbour) {
 
 #ifdef DEBUG_ETX
@@ -337,8 +356,10 @@ public:
 
 	// -----------------------------------------------------------------------
 
-	// insert the neighbor at any cost (if there is a room for it)
-	// even if eviction of a perfectly fine neighbor is called for
+	/**
+	 * Insert the neighbor at any cost (if there is a room for it)
+	 * 	even if eviction of a perfectly fine neighbor is called for
+	 */
 	error_t insert_neighbor(node_id_t neighbor) {
 		NeighborsIterator it;
 
@@ -372,7 +393,9 @@ public:
 
 	// -----------------------------------------------------------------------
 
-	// pin a neighbor so that it does not get evicted
+	/**
+	 * pin a neighbor so that it does not get evicted
+	 * */
 	error_t pin_neighbor(node_id_t neighbor) {
 		NeighborsIterator it;
 
@@ -405,7 +428,9 @@ public:
 
 	// -----------------------------------------------------------------------
 
-	// called by the RE as a feedback to the signal_should_insert event
+	/**
+	 * called by the RE as a feedback to the signal_should_insert event
+	 * */
 	error_t force_insert_neighbor(node_id_t neighbor) {
 		NeighborsIterator it;
 
@@ -424,9 +449,11 @@ public:
 
 	// -----------------------------------------------------------------------
 
-	// called when an acknowledgement is received;
-	// sign of a successful data transmission;
-	// to update forward link quality
+	/**
+	 * called when an acknowledgement is received;
+	 * sign of a successful data transmission;
+	 * to update forward link quality;
+	 * */
 	error_t ack_received(node_id_t neighbor) {
 		NeighborsValue *ne;
 		NeighborsIterator it = neighbors_.find(neighbor);
@@ -446,9 +473,11 @@ public:
 
 	// -----------------------------------------------------------------------
 
-	// called when an acknowledgement is not received;
-	// could be due to data pkt or acknowledgement loss
-	// to update forward link quality
+	/**
+	 * called when an acknowledgement is not received;
+	 * could be due to data pkt or acknowledgement loss;
+	 * to update forward link quality
+	 * */
 	error_t ack_not_received(node_id_t neighbor) {
 		NeighborsValue *ne;
 		NeighborsIterator it = neighbors_.find(neighbor);
@@ -471,8 +500,10 @@ public:
 
 	// -----------------------------------------------------------------------
 
-	// called when the parent changes
-	// clear state about data-driven link quality
+	/**
+	 * called when the parent changes;
+	 * clear state about data-driven link quality
+	 * */
 	error_t clear_DLQ(node_id_t neighbor) {
 
 		NeighborsIterator it = neighbors_.find(neighbor);
@@ -487,6 +518,8 @@ public:
 		return SUCCESS;
 	}
 
+	///@}
+
 	// ----------------------------------------------------------------------------------
 
 private:
@@ -499,67 +532,56 @@ private:
 
 	// --------------------------------------------------------------------
 
-	// Flags for the neighbor table entry
+	/// Flags for the neighbor table entry
 	enum NeighbourTableEntryType {
 		VALID_ENTRY = 0x1,
-		// A link becomes mature after BLQ_PKT_WINDOW
-		// packets are received and an estimate is computed
+		/// A link becomes mature after BLQ_PKT_WINDOW packets are received and an estimate is computed
 		MATURE_ENTRY = 0x2,
-		// Flag to indicate that this link has received the
-		// first sequence number
+		/// Flag to indicate that this link has received the first sequence number
 		INIT_ENTRY = 0x4,
-		// The upper layer has requested that this link be pinned
-		// Useful if we don't want to lose the root from the table
+		/// The upper layer has requested that this link be pinned
+		/// Useful if we don't want to lose the root from the table
 		PINNED_ENTRY = 0x8
 	};
 
 	// -----------------------------------------------------------------------
 
-	// configure the link estimator and some constants
+	/// configure the link estimator and some constants
 	enum LinkEstimatorConstants {
-		// If the eetx estimate is below this threshold
-		// do not evict a link
+		/// If the eetx estimate is below this threshold do not evict a link
 		EVICT_EETX_THRESHOLD = 55,
-		// maximum link update rounds before we expire the link
+		/// maximum link update rounds before we expire the link
 		MAX_AGE = 6,
-		// if received sequence number if larger than the last sequence
-		// number by this gap, we reinitialize the link
+		/// if received sequence number if larger than the last sequence number by this gap, we reinitialize the link
 		MAX_PKT_GAP = 10,
 		BEST_EETX = 0,
-		// if we don't know the link quality, we need to return a value so
-		// large that it will not be used to form paths
+		/// if we don't know the link quality, we need to return a value so large that it will not be used to form paths
 		VERY_LARGE_EETX_VALUE = 0xff,
-		// decay the link estimate using this alpha
-		// we use a denominator of 10, so this corresponds to 0.2
+		/// decay the link estimate using this alpha we use a denominator of 10, so this corresponds to 0.2
 		ALPHA = 9,
-		// number of packets to wait before computing a new
-		// DLQ (Data-driven Link Quality)
+		/// number of packets to wait before computing a new DLQ (Data-driven Link Quality)
 		DLQ_PKT_WINDOW = 5,
-		// number of beacons to wait before computing a new
-		// BLQ (Beacon-driven Link Quality)
+		/// number of beacons to wait before computing a new BLQ (Beacon-driven Link Quality)
 		BLQ_PKT_WINDOW = 3,
-		// largest EETX value that we feed into the link quality EWMA
-		// a value of 60 corresponds to having to make six transmissions
-		// to successfully receive one acknowledgement
+		/// largest EETX value that we feed into the link quality EWMA;
+		/// a value of 60 corresponds to having to make six transmissions to successfully receive one acknowledgement
 		LARGE_EETX_VALUE = 60
 	};
 
 	// -----------------------------------------------------------------------
 
-	// link estimation sequence, increment every time a beacon is sent
+	/// link estimation sequence, increment every time a beacon is sent
 	uint8_t link_est_seq_;
 
-	// if there is not enough room in the packet to put all the neighbour table
-	// entries, in order to do round robin we need to remember which entry
-	// we sent in the last beacon
+	/// if there is not enough room in the packet to put all the neighbour table entries, in order to do round robin we need to remember which entry we sent in the last beacon
 	uint8_t prev_sent_cnt_;
 
 	bool running_;
 
-	// Node id
+	/// Node own id
 	node_id_t self_;
 
-	/* Neighbour table -- info about links to the neighbours */
+	/// Neighbour table -- info about links to the neighbours
 	Neighbors neighbors_;
 
 	RecvCallbackVector recv_callbacks_;
@@ -567,6 +589,9 @@ private:
 	TopologyCallbackVector topology_callbacks_;
 
 	// -----------------------------------------------------------------------
+
+    ///@name Startup
+	///@{
 
 	Radio& radio() {
 		return *radio_;
@@ -600,31 +625,12 @@ private:
 		prev_sent_cnt_ = 0;
 	}
 
-	// ----------------------------------------------------------------------------------
-
-	void echo(const char *msg, ...) {
-		va_list fmtargs;
-		char buffer[1024];
-		int i;
-		for (i = 0; i < DEBUG_NODES_NR; i++) {
-
-			if (radio().id() == nodes[debug_nodes[i]]) {
-				va_start(fmtargs, msg);
-				vsnprintf(buffer, sizeof(buffer) - 1, msg, fmtargs);
-				va_end(fmtargs);
-#ifdef SHAWN
-				debug().debug("%d: LE: ", radio().id());
-#endif
-				debug().debug(buffer);
-#ifdef SHAWN
-				debug().debug("\n");
-#endif
-				break;
-			}
-		}
-	}
+	///@}
 
 	// -----------------------------------------------------------------------
+
+    ///@name Incoming and Outgoing Event Management
+	///@{
 
 	void receive(node_id_t from, size_t len, block_data_t *data) {
 
@@ -675,9 +681,30 @@ private:
 
 	// ----------------------------------------------------------------------------------
 
-	// called when link estimator generator packet or
-	// packets from upper layer that are wired to pass through
-	// link estimator is received
+	/*
+	 * Signals to the RE that a neighbour was evicted from the table
+	 */
+	void signal_evicted(node_id_t n) {
+		notify_listeners(LE_EVENT_NEIGHBOUR_EVICTED, n, NULL);
+	}
+
+	// -----------------------------------------------------------------------
+
+	/*
+	 * Signals to the RE that a node should be inserted into the neighbors table
+	 * The RE must then call a method (force_insert_neighbor()) on the LE to force a neighbour insertion
+	 */
+	void signal_should_insert(node_id_t node, block_data_t* msg) {
+		notify_listeners(LE_EVENT_SHOULD_INSERT, node, msg);
+	}
+
+	///@}
+
+	// ----------------------------------------------------------------------------------
+
+    ///@name Message Handling
+	///@{
+
 	void process_received_message(node_id_t from, size_t len,
 			LinkEstimatorMsg *msg) {
 
@@ -748,25 +775,10 @@ private:
 
 	// ----------------------------------------------------------------------------------
 
-	/*
-	 * Signals to the RE
-	 */
-
-	void signal_evicted(node_id_t n) {
-		notify_listeners(LE_EVENT_NEIGHBOUR_EVICTED, n, NULL);
-	}
-
-	// -----------------------------------------------------------------------
-
-	void signal_should_insert(node_id_t node, block_data_t* msg) {
-		notify_listeners(LE_EVENT_SHOULD_INSERT, node, msg);
-	}
-
-	// ----------------------------------------------------------------------------------
-
-	// add the link estimation header (seq no) and link estimation
-	// footer (neighbor entries) in the packet. Call just before sending
-	// the packet.
+	/**
+	 * 	 Adds the link estimation header (seq no) and link estimation footer (neighbor entries) in the packet.
+	 * 	 Called just before sending the packet.
+	 * 	 */
 	error_t add_header_and_footer(LinkEstimatorMsg *msg, uint8_t len) {
 
 		NeighborsIterator it;
@@ -811,9 +823,147 @@ private:
 		return SUCCESS;
 	}
 
+	///@}
+
+	// ----------------------------------------------------------------------------------
+
+	///@name ETX Computing
+	///@{
+
+	/**
+	 * 	 update the EETX estimator;
+	 * 	 called when new beacon estimate is done;
+	 * 	 also called when new DEETX estimate is done
+	 * 	 */
+	void update_EETX(NeighborsValue *ne, ctp_etx_t newEst) {
+		ne->eetx = (ALPHA * ne->eetx + (10 - ALPHA) * newEst) / 10;
+	}
+
+	// ----------------------------------------------------------------------------------
+
+	/// update data driven EETX
+	void updateDEETX(NeighborsValue *ne) {
+		ctp_etx_t estETX;
+
+		if (ne->data_success == 0) {
+			// if there were no successful packet transmission in the
+			// last window, our current estimate is the number of failed
+			// transmissions
+			estETX = (ne->data_total - 1) * 10;
+		} else {
+			estETX = (10 * ne->data_total) / ne->data_success - 10;
+			ne->data_success = 0;
+			ne->data_total = 0;
+		}
+		update_EETX(ne, estETX);
+	}
+
+	// ----------------------------------------------------------------------------------
+
+	/**
+	 * 	 EETX (Extra Expected number of Transmission)
+	 * 	 EETX = ETX - 1
+	 * 	 compute_EETX returns EETX*10
+	 * 	 */
+	ctp_etx_t compute_EETX(uint8_t q1) {
+		ctp_etx_t q;
+		if (q1 > 0) {
+			q = 2550 / q1 - 10;
+			if (q > 255) {
+				q = VERY_LARGE_EETX_VALUE;
+			}
+			return (uint8_t) q;
+		} else {
+			return VERY_LARGE_EETX_VALUE;
+		}
+	}
+
+	///@}
+
+	// ----------------------------------------------------------------------------------
+
+	///@name Neighbor Table Interface
+	///@{
+
+	/**
+	 *  we received seq from the neighbor pointed by it;
+	 *  update the last seen seq;
+	 *  receive and fail count;
+	 *  refresh the age;
+	 *  */
+	void update_neighbor_entry(NeighborsIterator it, uint8_t seq) {
+		NeighborsValue *ne;
+		uint8_t packetGap;
+
+		if (it == neighbors_.end()) {
+			return;
+		}
+
+		ne = &it->second;
+
+		if (ne->flags & INIT_ENTRY) {
+			ne->lastseq = seq;
+			ne->flags &= ~INIT_ENTRY;
+		}
+
+		packetGap = seq - ne->lastseq;
+		ne->lastseq = seq;
+		ne->rcvcnt++;
+		ne->inage = MAX_AGE;
+		if (packetGap > 0) {
+			ne->failcnt += packetGap - 1;
+		}
+		if (packetGap > MAX_PKT_GAP) {
+			ne->failcnt = 0;
+			ne->rcvcnt = 1;
+			ne->inquality = 0;
+		}
+
+		if (ne->rcvcnt >= BLQ_PKT_WINDOW) {
+			uint8_t totalPkt;
+			NeighborsValue * ne;
+			uint8_t newEst;
+			uint8_t minPkt;
+
+			minPkt = BLQ_PKT_WINDOW;
+
+			// update the inbound link quality by munging receive, fail count since last update
+			ne = &it->second;
+			if (ne->flags & VALID_ENTRY) {
+				if (ne->inage > 0)
+					ne->inage--;
+
+				if (ne->inage == 0) {
+					ne->flags ^= VALID_ENTRY;
+					ne->inquality = 0;
+				} else {
+					ne->flags |= MATURE_ENTRY;
+					totalPkt = ne->rcvcnt + ne->failcnt;
+					if (totalPkt < minPkt) {
+						totalPkt = minPkt;
+					}
+					if (totalPkt == 0) {
+						ne->inquality = (ALPHA * ne->inquality) / 10;
+					} else {
+						newEst = (255 * ne->rcvcnt) / totalPkt;
+						ne->inquality = (ALPHA * ne->inquality
+								+ (10 - ALPHA) * newEst) / 10;
+					}
+					ne->rcvcnt = 0;
+					ne->failcnt = 0;
+				}
+				update_EETX(ne, compute_EETX(ne->inquality));
+			} else {
+#ifdef LINK_ESTIMATOR_DEBUG
+				echo("- entry: %d is invalid", i);
+#endif
+			}
+		}
+	}
+
 	// -----------------------------------------------------------------------
 
-	// initialize the given entry in the table
+	/// initialize the given entry in the table
 	void init_neighbour_value(NeighborsValue *ne) {
 		ne->lastseq = 0;
 		ne->rcvcnt = 0;
@@ -826,7 +976,7 @@ private:
 
 	// ----------------------------------------------------------------------------------
 
-	// find the worst neighbor if the eetx estimate is greater than the given threshold
+	/// find the worst neighbor if the eetx estimate is greater than the given threshold
 	NeighborsIterator find_worst_neighbour(uint8_t thresholdEETX) {
 
 		NeighborsIterator it, worstNeighbour;
@@ -860,17 +1010,6 @@ private:
 			return neighbors_.end();
 
 		}
-	}
-
-	// ----------------------------------------------------------------------------------
-
-	// find a neighbour entry that is valid but not pinned
-	bool eligible_for_removal(NeighborsIterator it) {
-		if (it->second.flags & VALID_ENTRY
-				&& !(it->second.flags & (PINNED_ENTRY | MATURE_ENTRY))) {
-			return true;
-		}
-		return false;
 	}
 
 	// -----------------------------------------------------------------------
@@ -909,136 +1048,18 @@ private:
 
 	// ----------------------------------------------------------------------------------
 
-	// update the EETX estimator
-	// called when new beacon estimate is done
-	// also called when new DEETX estimate is done
-	void update_EETX(NeighborsValue *ne, ctp_etx_t newEst) {
-		ne->eetx = (ALPHA * ne->eetx + (10 - ALPHA) * newEst) / 10;
+	/// find a neighbour entry that is valid but not pinned
+	bool eligible_for_removal(NeighborsIterator it) {
+		if (it->second.flags & VALID_ENTRY
+				&& !(it->second.flags & (PINNED_ENTRY | MATURE_ENTRY))) {
+			return true;
+		}
+		return false;
 	}
 
 	// ----------------------------------------------------------------------------------
 
-	// update data driven EETX
-	void updateDEETX(NeighborsValue *ne) {
-		ctp_etx_t estETX;
-
-		if (ne->data_success == 0) {
-			// if there were no successful packet transmission in the
-			// last window, our current estimate is the number of failed
-			// transmissions
-			estETX = (ne->data_total - 1) * 10;
-		} else {
-			estETX = (10 * ne->data_total) / ne->data_success - 10;
-			ne->data_success = 0;
-			ne->data_total = 0;
-		}
-		update_EETX(ne, estETX);
-	}
-
-	// ----------------------------------------------------------------------------------
-
-	// EETX (Extra Expected number of Transmission)
-	// EETX = ETX - 1
-	// compute_EETX returns EETX*10
-	ctp_etx_t compute_EETX(uint8_t q1) {
-		ctp_etx_t q;
-		if (q1 > 0) {
-			q = 2550 / q1 - 10;
-			if (q > 255) {
-				q = VERY_LARGE_EETX_VALUE;
-			}
-			return (uint8_t) q;
-		} else {
-			return VERY_LARGE_EETX_VALUE;
-		}
-	}
-
-	// ----------------------------------------------------------------------------------
-
-	// update the inbound link quality by
-	// munging receive, fail count since last update
-	void update_neighbor_table_entry(NeighborsIterator it) {
-
-		uint8_t totalPkt;
-		NeighborsValue *ne;
-		uint8_t newEst;
-		uint8_t minPkt;
-
-		minPkt = BLQ_PKT_WINDOW;
-
-		if (it != neighbors_.end()) {
-			ne = &it->second;
-			if (ne->flags & VALID_ENTRY) {
-				if (ne->inage > 0)
-					ne->inage--;
-
-				if (ne->inage == 0) {
-					ne->flags ^= VALID_ENTRY;
-					ne->inquality = 0;
-				} else {
-					ne->flags |= MATURE_ENTRY;
-					totalPkt = ne->rcvcnt + ne->failcnt;
-					if (totalPkt < minPkt) {
-						totalPkt = minPkt;
-					}
-					if (totalPkt == 0) {
-						ne->inquality = (ALPHA * ne->inquality) / 10;
-					} else {
-						newEst = (255 * ne->rcvcnt) / totalPkt;
-						ne->inquality = (ALPHA * ne->inquality
-								+ (10 - ALPHA) * newEst) / 10;
-					}
-					ne->rcvcnt = 0;
-					ne->failcnt = 0;
-				}
-				update_EETX(ne, compute_EETX(ne->inquality));
-			} else {
-#ifdef LINK_ESTIMATOR_DEBUG
-				echo("- entry: %d is invalid", i);
-#endif
-			}
-		}
-	}
-
-	// ----------------------------------------------------------------------------------
-
-	// we received seq from the neighbor pointed by it
-	// update the last seen seq, receive and fail count
-	// refresh the age
-	void update_neighbor_entry(NeighborsIterator it, uint8_t seq) {
-		NeighborsValue *ne;
-		uint8_t packetGap;
-
-		//echo("updating %d",it->first);
-
-		ne = &it->second;
-
-		if (ne->flags & INIT_ENTRY) {
-			ne->lastseq = seq;
-			ne->flags &= ~INIT_ENTRY;
-		}
-
-		packetGap = seq - ne->lastseq;
-		ne->lastseq = seq;
-		ne->rcvcnt++;
-		ne->inage = MAX_AGE;
-		if (packetGap > 0) {
-			ne->failcnt += packetGap - 1;
-		}
-		if (packetGap > MAX_PKT_GAP) {
-			ne->failcnt = 0;
-			ne->rcvcnt = 1;
-			ne->inquality = 0;
-		}
-
-		if (ne->rcvcnt >= BLQ_PKT_WINDOW) {
-			update_neighbor_table_entry(it);
-		}
-	}
-
-	// ----------------------------------------------------------------------------------
-
-	//print the neighbor table. for debugging.
+	/// print the neighbor table. for debugging.
 	void print_neighbor_table() {
 		NeighborsIterator it;
 		NeighborsValue *ne;
@@ -1053,12 +1074,39 @@ private:
 		}
 	}
 
+	///@}
+
 	// ----------------------------------------------------------------------------------
+
+	///@name Debugging Interface
+	///@{
+
+	void echo(const char *msg, ...) {
+		va_list fmtargs;
+		char buffer[1024];
+		int i;
+		for (i = 0; i < DEBUG_NODES_NR; i++) {
+
+			if (radio().id() == nodes[debug_nodes[i]]) {
+				va_start(fmtargs, msg);
+				vsnprintf(buffer, sizeof(buffer) - 1, msg, fmtargs);
+				va_end(fmtargs);
+#ifdef SHAWN
+				debug().debug("%d: LE: ", radio().id());
+#endif
+				debug().debug(buffer);
+#ifdef SHAWN
+				debug().debug("\n");
+#endif
+				break;
+			}
+		}
+	}
+
+	///@}
+
 }
 ;
 
-// ----------------------------------------------------------------------------------
-
-// ----------------------------------------------------------------------------------
 }
 #endif /* __CTP_LINK_ESTIMATOR_H__ */
