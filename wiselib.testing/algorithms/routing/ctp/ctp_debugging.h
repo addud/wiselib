@@ -44,9 +44,9 @@
 
 #define NODES_NR			4
 //#define NODES				{410,411,412,413,414,415,416,417} //tubs isense ids
-//#define NODES				{418,419,420,421,422,424,426,427} // alternate tubs isense ids
+#define NODES				{406,407,408,409} // alternate tubs isense ids
 //#define NODES				{0,1,2,3} //Shawn ids
-#define NODES				{0x2000,0x2001,0x2008,0x2009} // alternate lubeck isense ids
+//#define NODES				{0x2000,0x2001,0x2008,0x2009} // alternate lubeck isense ids
 
 /* All these numbers represent indexes of the node IDs in the NODES list. */
 
