@@ -52,8 +52,6 @@ public:
 
 	typedef BasicTopology<OsModel_P, Neigh_P, Radio_P, Timer_P> self_type;
 
-	typedef typename OsModel::Os Os;
-
 	typedef typename Radio::node_id_t node_id_t;
 	typedef typename Radio::size_t size_t;
 	typedef typename Radio::block_data_t block_data_t;
